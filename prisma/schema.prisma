@@ -1,0 +1,276 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Alert {
+  id          String   @id @default(cuid())
+  source      String // e.g., "Splunk", "Manual"
+  severity    String // "critical", "high", "medium", "low"
+  title       String
+  description String?
+  rawData     Json     @map("raw_data")
+  status      String   @default("new") // "new", "investigating", "resolved", "dismissed"
+  timestamp   DateTime @default(now())
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  investigations Investigation[]
+
+  @@index([status])
+  @@index([severity])
+  @@index([timestamp])
+  @@map("alerts")
+}
+
+model Investigation {
+  id          String    @id @default(cuid())
+  alertId     String    @map("alert_id")
+  status      String    @default("pending") // "pending", "active", "completed", "failed", "stopped"
+  priority    String    @default("medium") // "critical", "high", "medium", "low"
+  aiProvider  String?   @map("ai_provider") // "glm", "openai", "azure", "openrouter"
+  modelUsed   String?   @map("model_used")
+  findings    Json? // Summary of investigation findings
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+  completedAt DateTime? @map("completed_at")
+
+  alert           Alert            @relation(fields: [alertId], references: [id], onDelete: Cascade)
+  agentExecutions AgentExecution[]
+  reports         Report[]
+
+  @@index([status])
+  @@index([alertId])
+  @@map("investigations")
+}
+
+model AgentExecution {
+  id              String    @id @default(cuid())
+  investigationId String    @map("investigation_id")
+  agentName       String    @map("agent_name") // "orchestrator", "context-enrichment", etc.
+  status          String    @default("pending") // "pending", "running", "completed", "failed", "stopped"
+  modelUsed       String?   @map("model_used")
+  prompt          String?   @db.Text
+  result          Json? // Agent execution result
+  errorMessage    String?   @map("error_message") @db.Text
+  executionTime   Int?      @map("execution_time") // milliseconds
+  confidence      Float? // 0.0 - 1.0
+  startedAt       DateTime? @map("started_at")
+  completedAt     DateTime? @map("completed_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
+
+  investigation Investigation @relation(fields: [investigationId], references: [id], onDelete: Cascade)
+
+  @@index([investigationId])
+  @@index([status])
+  @@index([agentName])
+  @@map("agent_executions")
+}
+
+model Report {
+  id              String   @id @default(cuid())
+  investigationId String   @map("investigation_id")
+  title           String
+  content         Json // Structured report content
+  summary         String?  @db.Text
+  recommendations String?  @db.Text
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  investigation Investigation @relation(fields: [investigationId], references: [id], onDelete: Cascade)
+
+  @@index([investigationId])
+  @@map("reports")
+}
+
+model AIProvider {
+  id        String   @id @default(cuid())
+  name      String   @unique // "GLM 4.6", "OpenAI GPT-4", etc.
+  type      String // "glm", "openai", "azure", "openrouter"
+  baseUrl   String?  @map("base_url")
+  modelName String   @map("model_name")
+  isActive  Boolean  @default(true) @map("is_active")
+  isDefault Boolean  @default(false) @map("is_default")
+  config    Json? // Additional configuration (temperature, max_tokens, etc.)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("ai_providers")
+}
+
+model SplunkConfig {
+  id               String   @id @default(cuid())
+  host             String // Splunk server hostname or IP
+  port             Int      @default(8089) // REST API port
+  scheme           String   @default("https") // "http" or "https"
+  username         String? // Optional: for basic auth
+  password         String? // Optional: for basic auth (encrypted in production)
+  apiToken         String?  @map("api_token") // Optional: for token auth (preferred)
+  isActive         Boolean  @default(true) @map("is_active")
+  indexStructure   Json?    @map("index_structure") // Stores {"index1": {"sourcetype1": "sample_event", ...}, ...}
+  structureFetchedAt DateTime? @map("structure_fetched_at") // When structure was last fetched
+  excludedIndexes  String?  @map("excluded_indexes") // Comma-separated list of index patterns to exclude (e.g., "_*,test*")
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  @@map("splunk_config")
+}
+
+model Neo4jConfig {
+  id            String    @id @default(cuid())
+  uri           String // bolt://hostname:7687
+  username      String // Neo4j username
+  password      String // Neo4j password (encrypted in production)
+  database      String    @default("neo4j") // Database name
+  isActive      Boolean   @default(true) @map("is_active")
+  schemaInitialized Boolean @default(false) @map("schema_initialized") // Whether constraints/indexes have been created
+  lastTestedAt  DateTime? @map("last_tested_at") // Last successful connection test
+  nodeCount     Int?      @map("node_count") // Cached count of nodes in graph
+  relationshipCount Int?  @map("relationship_count") // Cached count of relationships
+  lastStatsUpdate DateTime? @map("last_stats_update") // When counts were last updated
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  @@map("neo4j_config")
+}
+
+model IOCWhitelist {
+  id        String   @id @default(cuid())
+  type      String // "username", "hash", "filename", "ip", "domain"
+  value     String // The actual IOC value
+  reason    String?  @db.Text // Why this IOC is whitelisted
+  addedBy   String? // User or system that added it
+  isActive  Boolean  @default(true) @map("is_active")
+  metadata  Json? // Additional context (e.g., hash type, IP range, etc.)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([type, value])
+  @@index([type])
+  @@index([isActive])
+  @@map("ioc_whitelist")
+}
+
+model ThreatHunt {
+  id            String   @id @default(cuid())
+  status        String   @default("active") // "active", "paused", "completed", "failed"
+  startedAt     DateTime @default(now()) @map("started_at")
+  lastRunAt     DateTime? @map("last_run_at")
+  completedAt   DateTime? @map("completed_at")
+  findingsCount Int      @default(0) @map("findings_count")
+  cyclesRun     Int      @default(0) @map("cycles_run")
+  config        Json? // Hunt configuration (patterns to use, thresholds, etc.)
+  errorMessage  String?  @map("error_message") @db.Text
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  findings ThreatFinding[]
+
+  @@index([status])
+  @@index([startedAt])
+  @@map("threat_hunts")
+}
+
+model ThreatFinding {
+  id               String    @id @default(cuid())
+  threatHuntId     String    @map("threat_hunt_id")
+  findingHash      String    @map("finding_hash") // SHA-256 hash for deduplication
+  findingType      String    @map("finding_type") // "brute_force", "suspicious_process", "lateral_movement", etc.
+  affectedEntities Json      @map("affected_entities") // {users: [], hosts: [], ips: [], processes: []}
+  description      String    @db.Text
+  severity         String // "critical", "high", "medium", "low"
+  confidence       Float? // 0.0 - 1.0
+  rawData          Json      @map("raw_data") // Original detection data from Splunk
+  mitreAttack      String?   @map("mitre_attack") // MITRE ATT&CK technique ID
+  alertId          String?   @map("alert_id") // Created alert if spawned
+  investigationId  String?   @map("investigation_id") // Spawned investigation if created
+  savedQueryId     String?   @map("saved_query_id") // Query that generated this finding
+  status           String    @default("pending") // "pending", "investigating", "dismissed"
+  detectedAt       DateTime  @default(now()) @map("detected_at")
+  createdAt        DateTime  @default(now()) @map("created_at")
+
+  threatHunt  ThreatHunt  @relation(fields: [threatHuntId], references: [id], onDelete: Cascade)
+  savedQuery  SavedQuery? @relation(fields: [savedQueryId], references: [id], onDelete: SetNull)
+
+  @@unique([threatHuntId, findingHash])
+  @@index([threatHuntId])
+  @@index([findingType])
+  @@index([status])
+  @@index([severity])
+  @@index([savedQueryId])
+  @@map("threat_findings")
+}
+
+enum QueryCategory {
+  authentication
+  endpoint
+  network
+  privilege_escalation
+  data_exfiltration
+  malware
+  lateral_movement
+  persistence
+  defense_evasion
+  discovery
+  other
+}
+
+model SavedQuery {
+  id                  String        @id @default(cuid())
+  name                String
+  description         String?       @db.Text
+  splQuery            String        @map("spl_query") @db.Text // The Splunk SPL query
+  category            QueryCategory @default(other)
+  severity            String? // "critical", "high", "medium", "low"
+  mitreAttack         String?       @map("mitre_attack") // MITRE ATT&CK technique ID
+  isAutomated         Boolean       @default(false) @map("is_automated") // Agent-generated vs manual
+  findingsCount       Int           @default(0) @map("findings_count") // Number of findings generated
+  executionsCount     Int           @default(0) @map("executions_count") // Number of times executed
+  lastExecutedAt      DateTime?     @map("last_executed_at")
+
+  // Memory & Learning fields
+  effectivenessScore  Float?        @default(0.0) @map("effectiveness_score") // 0-100 score based on findings quality
+  successRate         Float?        @default(0.0) @map("success_rate") // Percentage of successful executions
+  avgResultsReturned  Float?        @default(0.0) @map("avg_results_returned") // Average number of results
+  falsePositiveRate   Float?        @default(0.0) @map("false_positive_rate") // Percentage hitting whitelisted entities
+  alertType           String?       @map("alert_type") // Type of alert this query works well for
+  investigationContext Json?        @map("investigation_context") // Context where query was effective
+  findingsProduced    Json?         @map("findings_produced") // Sample of findings this query has produced
+  autoSaved           Boolean       @default(false) @map("auto_saved") // Auto-saved by agent vs manually created
+
+  createdAt           DateTime      @default(now()) @map("created_at")
+  updatedAt           DateTime      @updatedAt @map("updated_at")
+
+  executions     QueryExecution[]
+  threatFindings ThreatFinding[]
+
+  @@index([category])
+  @@index([severity])
+  @@index([isAutomated])
+  @@index([lastExecutedAt])
+  @@index([effectivenessScore])
+  @@index([alertType])
+  @@map("saved_queries")
+}
+
+model QueryExecution {
+  id              String    @id @default(cuid())
+  savedQueryId    String?   @map("saved_query_id") // Null if ad-hoc query
+  executedBy      String?   @map("executed_by") // "agent", "user", "threat_hunt"
+  status          String // "success", "failed", "timeout"
+  resultCount     Int?      @map("result_count")
+  executionTimeMs Int?      @map("execution_time_ms") // Execution time in milliseconds
+  timeRange       Json?     @map("time_range") // {earliest: string, latest: string}
+  errorMessage    String?   @map("error_message") @db.Text
+  createdAt       DateTime  @default(now()) @map("created_at")
+
+  savedQuery SavedQuery? @relation(fields: [savedQueryId], references: [id], onDelete: SetNull)
+
+  @@index([savedQueryId])
+  @@index([status])
+  @@index([createdAt])
+  @@map("query_executions")
+}

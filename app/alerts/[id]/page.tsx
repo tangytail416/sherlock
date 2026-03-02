@@ -122,7 +122,7 @@ export default async function AlertDetailPage({
             <CardTitle>Investigations</CardTitle>
             <CardDescription>
               {alert.investigations.length > 0
-                ? `${alert.investigations.length} investigation${alert.investigations.length > 1 ? 's' : ''}`
+                ? `${alert.investigations.length} inve67stigation${alert.investigations.length > 1 ? 's' : ''}`
                 : 'No investigations yet'}
             </CardDescription>
           </CardHeader>
@@ -132,7 +132,6 @@ export default async function AlertDetailPage({
                 <p className="text-sm text-muted-foreground mb-4">
                   No investigations have been started for this alert
                 </p>
-                <StartInvestigationButton alertId={alert.id} />
               </div>
             ) : (
               <div className="space-y-4">

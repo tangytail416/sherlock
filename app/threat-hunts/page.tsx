@@ -123,7 +123,7 @@ export default function ThreatHuntsPage() {
           <DialogTrigger asChild>
             <Button>
               <Plus className="mr-2 h-4 w-4" />
-              New Hunt
+              Start new hunt
             </Button>
           </DialogTrigger>
           <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
@@ -156,7 +156,7 @@ export default function ThreatHuntsPage() {
             {hunts.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={8} className="text-center text-muted-foreground">
-                  No threat hunts yet. Start your first hunt to discover threats.
+                  No recorded threat hunts.
                 </TableCell>
               </TableRow>
             ) : (

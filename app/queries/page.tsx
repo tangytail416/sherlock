@@ -4,6 +4,8 @@ import { Button } from '@/components/ui/button';
 import { QueryLibraryTable } from '@/components/queries/query-library-table';
 import { prisma } from '@/lib/db';
 import { Card, CardContent } from '@/components/ui/card';
+// 1. IMPORT THE NEW BUTTON
+import { DeleteAllQueriesButton } from '@/components/queries/delete-all-queries-button';
 
 async function getQueries() {
   try {
@@ -66,12 +68,18 @@ export default async function QueriesPage() {
             Browse and manage Splunk queries from agents and manual entries
           </p>
         </div>
-        <Button asChild>
-          <Link href="/queries/new">
-            <Plus className="h-4 w-4 mr-2" />
-            Create Query
-          </Link>
-        </Button>
+        
+        {/* 2. PLACE THE BUTTONS IN A FLEX CONTAINER SO THEY SIT NEXT TO EACH OTHER */}
+        <div className="flex items-center gap-2">
+          <DeleteAllQueriesButton />
+          
+          <Button asChild>
+            <Link href="/queries/new">
+              <Plus className="h-4 w-4 mr-2" />
+              Create Query
+            </Link>
+          </Button>
+        </div>
       </div>
 
       {/* Stats Overview */}

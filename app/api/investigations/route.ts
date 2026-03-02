@@ -76,19 +76,41 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Alert not found' }, { status: 404 });
     }
 
-    // Check if an investigation already exists for this alert (within last 5 seconds to prevent race conditions)
-    const recentInvestigation = await prisma.investigation.findFirst({
+    // Check if ANY non-completed investigation already exists for this alert
+    const existingInvestigation = await prisma.investigation.findFirst({
       where: {
         alertId: validatedData.alertId,
-        createdAt: {
-          gte: new Date(Date.now() - 5000), // Within last 5 seconds
+        status: {
+          in: ['pending', 'active', 'running', 'stopped', 'failed']
         },
       },
+      orderBy: { createdAt: 'desc' },
     });
 
-    if (recentInvestigation) {
-      console.log(`Duplicate investigation request detected for alert ${validatedData.alertId}, returning existing investigation ${recentInvestigation.id}`);
-      return NextResponse.json(recentInvestigation, { status: 200 });
+    if (existingInvestigation) {
+      console.log(`Existing investigation request detected for alert ${validatedData.alertId}, returning existing investigation ${existingInvestigation.id}`);
+      
+      // === FIX: IF IT IS PENDING, STOPPED, OR FAILED, START IT NOW ===
+      if (['pending', 'stopped', 'failed'].includes(existingInvestigation.status)) {
+        console.log(`Investigation is currently ${existingInvestigation.status}. Kickstarting workflow...`);
+        
+        // Ensure alert is marked as investigating
+        await prisma.alert.update({
+          where: { id: validatedData.alertId },
+          data: { status: 'investigating' },
+        });
+
+        // Trigger the workflow in the background
+        triggerAgentExecution(existingInvestigation.id, alert, existingInvestigation.aiProvider || validatedData.aiProvider).catch((error) => {
+          console.error('Error triggering agent execution:', error);
+        });
+
+        // Optimistically update the status for the frontend response
+        existingInvestigation.status = 'active';
+      }
+      // ===============================================================
+
+      return NextResponse.json(existingInvestigation, { status: 200 });
     }
 
     // Get default AI provider if not specified
@@ -133,7 +155,6 @@ export async function POST(request: NextRequest) {
     });
 
     // Automatically trigger agent execution in the background
-    // We don't await this to avoid blocking the response
     triggerAgentExecution(investigation.id, alert, aiProvider).catch((error) => {
       console.error('Error triggering agent execution:', error);
     });

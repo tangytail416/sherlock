@@ -12,6 +12,9 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import { DeleteInvestigationButton } from '@/components/investigations/delete-investigation-button';
+// 1. IMPORT THE NEW START BUTTON
+import { StartInvestigationTableButton } from '@/components/investigations/start-investigation-table-button';
 
 async function getInvestigations() {
   try {
@@ -144,11 +147,23 @@ export default async function InvestigationsPage() {
                     })}
                   </TableCell>
                   <TableCell className="text-right">
-                    <Button asChild variant="ghost" size="sm">
-                      <Link href={`/investigations/${investigation.id}`}>
-                        <Eye className="h-4 w-4" />
-                      </Link>
-                    </Button>
+                    
+                    <div className="flex justify-end items-center">
+                      {/* 2. PLACE THE START BUTTON BEFORE THE EYE ICON */}
+                      <StartInvestigationTableButton 
+                        alertId={investigation.alert.id} 
+                        currentStatus={investigation.status} 
+                      />
+
+                      <Button asChild variant="ghost" size="sm">
+                        <Link href={`/investigations/${investigation.id}`}>
+                          <Eye className="h-4 w-4" />
+                        </Link>
+                      </Button>
+                      
+                      <DeleteInvestigationButton id={investigation.id} />
+                    </div>
+
                   </TableCell>
                 </TableRow>
               ))

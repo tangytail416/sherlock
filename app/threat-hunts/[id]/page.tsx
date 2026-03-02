@@ -16,6 +16,8 @@ import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { PageLayout } from '@/components/layout/page-layout';
 import { ArrowLeft } from 'lucide-react';
+// 1. IMPORT THE NEW BUTTON
+import { InvestigateFindingButton } from '@/components/threat-hunting/investigate-finding-button';
 
 async function getThreatHunt(id: string) {
   try {
@@ -222,7 +224,7 @@ export default async function ThreatHuntDetailPage({
         <CardContent>
           {hunt.findings.length === 0 ? (
             <div className="text-center py-8 text-muted-foreground">
-              Nothing to show here yet 67676767
+              Nothing to show here yet
             </div>
           ) : (
             <div className="rounded-md border">
@@ -282,13 +284,19 @@ export default async function ThreatHuntDetailPage({
                           })}
                         </TableCell>
                         <TableCell className="text-right">
-                          {finding.investigationId && (
+                          
+                          {/* 2. ADD THE CONDITIONAL RENDERING HERE */}
+                          {finding.investigationId ? (
                             <Link href={`/investigations/${finding.investigationId}`}>
                               <Button variant="outline" size="sm">
                                 View Investigation
                               </Button>
                             </Link>
+                          ) : (
+                            <InvestigateFindingButton findingId={finding.id} />
                           )}
+                          {/* ======================================= */}
+                          
                         </TableCell>
                       </TableRow>
                     );

@@ -87,7 +87,7 @@ export async function POST(request: NextRequest) {
     const config: Partial<ThreatHuntConfig> = {
       patterns: body.patterns || undefined,
       maxCycles: body.maxCycles || 10,
-      cycleIntervalSeconds: body.cycleIntervalSeconds || 300,
+      cycleIntervalSeconds: body.cycleIntervalSeconds || 60,
       maxFindingsPerPattern: body.maxFindingsPerPattern || 5,
       minSeverityForInvestigation: body.minSeverityForInvestigation || 'medium',
       deduplicationWindowHours: body.deduplicationWindowHours || 24,

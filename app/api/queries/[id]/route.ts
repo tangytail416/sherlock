@@ -118,6 +118,7 @@ export async function PUT(
 }
 
 // DELETE /api/queries/[id] - Delete a query
+// DELETE /api/queries/[id] - Delete a query (or ALL queries)
 export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -125,6 +126,14 @@ export async function DELETE(
   try {
     const { id } = await params;
 
+    // === ADD THIS BLOCK TO INTERCEPT "DELETE ALL" ===
+    if (id === 'delete-all') {
+      await prisma.savedQuery.deleteMany({});
+      return NextResponse.json({ success: true, message: 'All queries deleted' });
+    }
+    // ================================================
+
+    // Normal single-deletion logic
     await prisma.savedQuery.delete({
       where: { id },
     });
@@ -186,3 +195,5 @@ export async function PATCH(
     );
   }
 }
+
+

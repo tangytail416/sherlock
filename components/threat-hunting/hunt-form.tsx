@@ -281,9 +281,9 @@ export function ThreatHuntForm({ onSuccess }: ThreatHuntFormProps) {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="low">Low and above</SelectItem>
+                <SelectItem value="low">No minimum</SelectItem>
                 <SelectItem value="medium">Medium and above</SelectItem>
-                <SelectItem value="high">High and above</SelectItem>
+                <SelectItem value="high">High and critical</SelectItem>
                 <SelectItem value="critical">Critical only</SelectItem>
               </SelectContent>
             </Select>

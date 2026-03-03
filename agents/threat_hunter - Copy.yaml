@@ -11,7 +11,7 @@ model:
   provider: openrouter
   model_name: z-ai/glm-4.6
   temperature: 0.1
-  max_tokens: 16384
+  max_tokens: 4096
 
 capabilities:
   - threat_detection
@@ -34,7 +34,7 @@ prompts:
 
     1. Analyze query results from threat hunting searches
     2. Identify DISTINCT suspicious activities that warrant investigation
-    3. Extract key entities (users, hosts, IPs, processes) and the SPECIFIC DATES/TIMES of activity from findings
+    3. Extract key entities (users, hosts, IPs, processes) from findings
     4. Categorize findings by attack type and severity
     5. Provide structured JSON output for each suspicious activity found
 
@@ -158,13 +158,12 @@ prompts:
     - 0.60-0.74: Medium confidence (suspicious but possible false positive)
     - Below 0.60: Do NOT report
 
-    **STEP 7: WRITE CONCISE DESCRIPTION (MUST INCLUDE DATE/TIME)**
-    Template: "[Finding type] detected on [Specific Date and Time] involving [affected entities]. [Key indicator]."
-    CRITICAL: You MUST include the exact timestamp or timeframe of the activity in the description so future investigation agents know when to search.
+    **STEP 7: WRITE CONCISE DESCRIPTION**
+    Template: "[Finding type] detected involving [affected entities]. [Key indicator]."
 
     Examples:
-    - "Brute force attack detected on 2024-10-27 14:32:00 UTC from IP 192.168.1.50 targeting admin account on DC01. 15 failed login attempts observed within 3 minutes."
-    - "Malicious macro execution detected on 2024-10-27 09:15:22 UTC on DESKTOP-123. Excel spawned PowerShell with encoded command connecting to external IP 45.67.89.123."
+    - "Brute force attack detected from IP 192.168.1.50 targeting admin account on DC01. 15 failed login attempts observed within 3 minutes."
+    - "Malicious macro execution detected on DESKTOP-123. Excel spawned PowerShell with encoded command connecting to external IP 45.67.89.123."
 
     **STEP 8: MAP TO MITRE ATT&CK**
     Assign the primary MITRE ATT&CK technique ID.
@@ -176,7 +175,7 @@ prompts:
     ```json
     {
       "finding_type": "brute_force",
-      "description": "Brute force attack detected on 2024-10-27 14:32:00 UTC from IP 192.168.1.50 targeting admin account on DC01. 15 failed login attempts observed within 3 minutes.",
+      "description": "Brute force attack detected from IP 192.168.1.50 targeting admin account on DC01. 15 failed login attempts observed within 3 minutes.",
       "severity": "high",
       "confidence": 0.85,
       "affected_entities": {
@@ -187,7 +186,6 @@ prompts:
       },
       "mitre_attack": ["T1110.001"],
       "raw_indicators": {
-        "timestamp": "2024-10-27 14:32:00 UTC",
         "failed_attempts": 15,
         "time_window_minutes": 3,
         "source_ip": "192.168.1.50"
@@ -204,7 +202,7 @@ prompts:
       "findings": [
         {
           "finding_type": "string",
-          "description": "string (2-3 sentences, MUST include Date/Time)",
+          "description": "string (2-3 sentences)",
           "severity": "critical|high|medium|low",
           "confidence": 0.0-1.0,
           "affected_entities": {
@@ -260,7 +258,7 @@ prompts:
     - Use double quotes for all strings
     - No trailing commas
     - Ensure all brackets and braces are balanced
-    - Confidence < 0.60 -> Do not report
+    - Confidence < 0.60 → Do not report
     - Maximum 2-3 sentences per description
     - Focus on HIGH-CONFIDENCE detections only
 

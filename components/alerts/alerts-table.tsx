@@ -2,8 +2,9 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { formatDistanceToNow } from 'date-fns';
-import { Eye, Search as SearchIcon } from 'lucide-react';
+import { Eye, Search as SearchIcon, Trash } from 'lucide-react';
 import {
   Table,
   TableBody,
@@ -52,9 +53,22 @@ const statusColors = {
 } as const;
 
 export function AlertsTable({ alerts }: AlertsTableProps) {
+  const router = useRouter(); 
   const [searchQuery, setSearchQuery] = useState('');
   const [severityFilter, setSeverityFilter] = useState<string>('all');
   const [statusFilter, setStatusFilter] = useState<string>('all');
+
+  const handleDelete = async (id: string) => {
+    //const confirmed = confirm('Are you sure you want to delete this alert?');
+    //if (!confirmed) return;
+
+    try {
+      await fetch(`/api/alerts/${id}/delete`, { method: 'POST' });
+      router.refresh(); 
+    } catch (error) {
+      console.error('Error deleting alert:', error);
+    }
+  };
 
   const filteredAlerts = alerts.filter((alert) => {
     const matchesSearch =
@@ -174,6 +188,9 @@ export function AlertsTable({ alerts }: AlertsTableProps) {
                       <Link href={`/alerts/${alert.id}`}>
                         <Eye className="h-4 w-4" />
                       </Link>
+                    </Button>
+                    <Button variant="ghost" size="sm" onClick={() => handleDelete(alert.id)}>
+                        <Trash className="h-4 w-4" />
                     </Button>
                   </TableCell>
                 </TableRow>

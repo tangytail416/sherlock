@@ -73,7 +73,7 @@ export default async function AlertDetailPage({
           </p>
         </div>
       </div>
-      {alert.status === 'new' && <StartInvestigationButton alertId={alert.id} />}
+      <StartInvestigationButton alertId={alert.id} />
     </div>
   );
 

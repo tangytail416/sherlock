@@ -3,7 +3,9 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { formatDistanceToNow } from 'date-fns';
-import { Target, Plus, Pause, Play, Trash, Square, Eye} from 'lucide-react';
+
+import { Target, Plus, Pause, Play, Trash, Square, Eye, IterationCw } from 'lucide-react';
+
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -73,32 +75,37 @@ export default function ThreatHuntsPage() {
 
   const handleStopHunt = async (id: string) => {
     try {
-      await fetch(`/api/threat-hunts/${id}/sotp`, { method: 'POST' });
+      await fetch(`/api/threat-hunts/${id}/sotp`, { method: 'POST' }); // dont fix the typo
       fetchHunts();
     } catch (error) {
       console.error('Error stopping hunt:', error);
     }
   };
+
+  // ADDED: Handler to restart a threat hunt
+  const handleRestartHunt = async (id: string) => {
+    try {
+      await fetch(`/api/threat-hunts/${id}/restart`, { method: 'POST' });
+      fetchHunts();
+    } catch (error) {
+      console.error('Error restarting hunt:', error);
+    }
+  };
+
   const handleDeleteHunt = async (id: string) => {
-  const confirmed = confirm('DELETE HUNT??????????');
+    const confirmed = confirm('Are you sure you want to delete this threat hunt?');
 
-  if (!confirmed) return;
-  //alert(id);
+    if (!confirmed) return;
 
-  try {
-    await fetch(`/api/threat-hunts/${id}`, {
-      method: 'DELETE',
-    });
-    fetchHunts();
-  } catch (error) {
-    console.error('Error deleting hunt:', error);
-  }
-};
-
-
-
-
-
+    try {
+      await fetch(`/api/threat-hunts/${id}`, {
+        method: 'DELETE',
+      });
+      fetchHunts();
+    } catch (error) {
+      console.error('Error deleting hunt:', error);
+    }
+  };
 
   const handleHuntCreated = () => {
     setDialogOpen(false);
@@ -161,7 +168,6 @@ export default function ThreatHuntsPage() {
               </TableRow>
             ) : (
               hunts.map((hunt) => (
-				
                 <TableRow key={hunt.id}>
                   <TableCell>
                     <Badge variant={statusColors[hunt.status as keyof typeof statusColors] || 'default'}>
@@ -220,12 +226,26 @@ export default function ThreatHuntsPage() {
                   </TableCell>
                   <TableCell className="text-right">
                     <div className="flex justify-end gap-2">
+                      
+                      {/* ADDED: Restart button shown only if status is NOT active */}
+                      {hunt.status !== 'active' && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleRestartHunt(hunt.id)}
+                        >
+                          <IterationCw className="mr-1 h-3 w-3" />
+                          Restart
+                        </Button>
+                      )}
+
                       <Link href={`/threat-hunts/${hunt.id}`}>
                         <Button variant="outline" size="sm">
                           <Eye className="mr-1 h-3 w-3" />
                           View
                         </Button>
                       </Link>
+
                       {hunt.status === 'active' && (
                         <Button
                           variant="outline"
@@ -236,7 +256,8 @@ export default function ThreatHuntsPage() {
                           Stop
                         </Button>
                       )}
-					  {hunt.status !== 'active' && (
+                      
+                      {hunt.status !== 'active' && (
                         <Button
                           variant="outline"
                           size="sm"

@@ -789,7 +789,7 @@ async function executeSpecialistAgent(
 
       // Safety check: if agent returns "continue" without a query, force it to report
       if (agentDecision.action === 'continue') {
-        console.log(`[Agent: ${agentName}] ⚠️  Agent tried to use deprecated 'continue' action - forcing report`);
+        console.log(`[Agent: ${agentName}] ⚠️  Agent tried to use deprecated 'continue' action - forcing report`);
         agentDecision.action = 'report';
         agentDecision.analysis = agentDecision.analysis || {
           status: 'completed',
@@ -833,7 +833,7 @@ async function executeSpecialistAgent(
           );
 
           console.warn(
-            `[Agent: ${agentName}] ⚠️  Query already executed in iteration ${firstOccurrence + 1}. Skipping duplicate.`
+            `[Agent: ${agentName}] ⚠️  Query already executed in iteration ${firstOccurrence + 1}. Skipping duplicate.`
           );
           console.log(`[Agent: ${agentName}] Duplicate query: ${searchQuery.substring(0, 100)}...`);
 
@@ -904,7 +904,7 @@ async function executeSpecialistAgent(
           // If results are too large (>50k tokens), prompt agent to refine query
           const RESULTS_TOKEN_THRESHOLD = 50000;
           if (resultsTokenCount > RESULTS_TOKEN_THRESHOLD) {
-            console.log(`[Agent: ${agentName}] ⚠️  Query results too large (${resultsTokenCount.toLocaleString()} tokens > ${RESULTS_TOKEN_THRESHOLD.toLocaleString()} threshold)`);
+            console.log(`[Agent: ${agentName}] ⚠️  Query results too large (${resultsTokenCount.toLocaleString()} tokens > ${RESULTS_TOKEN_THRESHOLD.toLocaleString()} threshold)`);
 
             // Emit warning event
             emitAgentEvent({
@@ -920,7 +920,12 @@ async function executeSpecialistAgent(
               timestamp: new Date(),
             });
 
-            // Store a truncated version with guidance to refine
+            // =========================================================================
+            // FIX: PARROTING ISSUE
+            // Replace the huge instruction string inside the data array with a 
+            // generic system note, preventing the agent from trying to copy the text.
+            // The actual instructions are now injected at the bottom of buildAgentPrompt
+            // =========================================================================
             agentFindings.push({
               iteration: agentIteration,
               action: 'query',
@@ -934,19 +939,7 @@ async function executeSpecialistAgent(
               },
               reasoning: agentDecision.reasoning,
               refinement_needed: true,
-              refinement_guidance: `Your query returned too much data (${resultsTokenCount.toLocaleString()} tokens). Please refine your query by:
-1. Adding more specific filters (e.g., specific eventName, sourceIPAddress, or userName)
-2. Reducing the time range (e.g., use earliest=-1h instead of -24h)
-3. Using aggregation commands (| stats, | rare, | top) instead of returning raw events
-4. Adding | head N to limit results to a specific number
-5. Using more precise field filters to target specific events
-
-Example refinements:
-- Instead of: index=cloudtrail earliest=-24h
-- Try: index=cloudtrail eventName=CreateAccessKey earliest=-1h | head 20
-- Or: index=cloudtrail userIdentity.userName=suspi cious-user earliest=-6h
-
-The sample of 10 results is shown below for reference.`
+              system_directive: "Results too large. Agent MUST write a new, refined query."
             });
 
             console.log(`[Agent: ${agentName}] Results truncated to 10 sample entries. Agent will be prompted to refine query.`);
@@ -986,7 +979,7 @@ The sample of 10 results is shown below for reference.`
                 .filter(f => f.action === 'query' && !f.skipped && f.results?.length === 0);
 
               if (recentEmptyQueries.length >= 3) {
-                console.warn(`[Agent: ${agentName}] ⚠️  Three consecutive queries returned no results`);
+                console.warn(`[Agent: ${agentName}] ⚠️  Three consecutive queries returned no results`);
 
                 // Count total empty queries
                 const allEmptyQueries = agentFindings
@@ -1053,7 +1046,6 @@ The sample of 10 results is shown below for reference.`
           confidence: agentDecision.confidence,
         });
 
-        // Emit output event
         // Emit output event
         emitAgentEvent({
           investigationId: state.investigation_id,
@@ -1167,12 +1159,12 @@ The sample of 10 results is shown below for reference.`
         const hasRelationships = Array.isArray(agentRelationships) && agentRelationships.length > 0;
 
         if (!hasEntities && !hasRelationships) {
-          console.warn(`[Agent: ${agentName}] ⚠️  Neo4j WARNING: Agent returned NO entities or relationships. Check agent output schema and prompt instructions.`);
-          console.warn(`[Agent: ${agentName}] ⚠️  Agent summary structure:`, Object.keys(finalReport.summary || {}));
+          console.warn(`[Agent: ${agentName}] ⚠️  Neo4j WARNING: Agent returned NO entities or relationships. Check agent output schema and prompt instructions.`);
+          console.warn(`[Agent: ${agentName}] ⚠️  Agent summary structure:`, Object.keys(finalReport.summary || {}));
         } else if (!hasRelationships) {
-          console.warn(`[Agent: ${agentName}] ⚠️  Neo4j WARNING: Agent returned ${agentEntities.length} entities but NO relationships. Entity-to-entity connections will not be created.`);
+          console.warn(`[Agent: ${agentName}] ⚠️  Neo4j WARNING: Agent returned ${agentEntities.length} entities but NO relationships. Entity-to-entity connections will not be created.`);
         } else if (!hasEntities) {
-          console.warn(`[Agent: ${agentName}] ⚠️  Neo4j WARNING: Agent returned ${agentRelationships.length} relationships but NO standalone entities.`);
+          console.warn(`[Agent: ${agentName}] ⚠️  Neo4j WARNING: Agent returned ${agentRelationships.length} relationships but NO standalone entities.`);
         }
 
         // Validate relationship structure (after mapping)
@@ -1229,44 +1221,43 @@ The sample of 10 results is shown below for reference.`
 }
 
 /**
- * Orchestrator Reflection Phase
- * Reviews agent findings and decides next steps
- */
+ * Orchestrator Reflection Phase
+ * Reviews agent findings and decides next steps
+ */
 async function orchestratorReflection(state: AgenticState, aiProvider: string): Promise<void> {
-  // ... (No changes needed here, keeping logic as-is per instructions)
-  console.log('[Orchestrator] Reflecting on findings and planning next steps...');
+  console.log('[Orchestrator] Reflecting on findings and planning next steps...');
 
-  const config = await loadAgentConfig('orchestrator');
-  if (!config) return;
+  const config = await loadAgentConfig('orchestrator');
+  if (!config) return;
 
-  const client = await createAIClient(aiProvider);
+  const client = await createAIClient(aiProvider);
 
-  // Check for user steering messages for investigation scope
-  const globalStates = (global as any).investigationStates;
-  let userGuidanceSection = '';
-  
-  if (globalStates && globalStates[state.investigation_id]) {
-    const globalState = globalStates[state.investigation_id];
-    
-    // Get unacknowledged investigation-scoped messages (including routed ones)
-    const investigationMessages = (globalState.user_messages || []).filter(
-      (msg: any) => msg.scope === 'investigation' && !msg.acknowledged
-    );
+  // Check for user steering messages for investigation scope
+  const globalStates = (global as any).investigationStates;
+  let userGuidanceSection = '';
+  
+  if (globalStates && globalStates[state.investigation_id]) {
+    const globalState = globalStates[state.investigation_id];
+    
+    // Get unacknowledged investigation-scoped messages (including routed ones)
+    const investigationMessages = (globalState.user_messages || []).filter(
+      (msg: any) => msg.scope === 'investigation' && !msg.acknowledged
+    );
 
-    if (investigationMessages.length > 0) {
-      console.log(`[Orchestrator] 📨 ${investigationMessages.length} unacknowledged investigation guidance message(s)`);
-      
-      const now = new Date();
-      userGuidanceSection = `\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    if (investigationMessages.length > 0) {
+      console.log(`[Orchestrator] 📨 ${investigationMessages.length} unacknowledged investigation guidance message(s)`);
+      
+      const now = new Date();
+      userGuidanceSection = `\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 🚨 USER STRATEGIC GUIDANCE 🚨
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 The user has provided strategic direction for this investigation:
 
 ${investigationMessages.map((msg: any) => {
-  const timeSince = Math.floor((now.getTime() - new Date(msg.timestamp).getTime()) / 1000);
-  const routedNote = msg.routedToOrchestrator ? ' [Routed from active agent timeout]' : '';
-  return `🚨 USER GUIDANCE (${timeSince}s ago)${routedNote}: ${msg.message}`;
+  const timeSince = Math.floor((now.getTime() - new Date(msg.timestamp).getTime()) / 1000);
+  const routedNote = msg.routedToOrchestrator ? ' [Routed from active agent timeout]' : '';
+  return `🚨 USER GUIDANCE (${timeSince}s ago)${routedNote}: ${msg.message}`;
 }).join('\n\n')}
 
 CRITICAL INSTRUCTIONS:
@@ -1278,75 +1269,75 @@ CRITICAL INSTRUCTIONS:
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
 
-      // Mark messages as acknowledged by orchestrator
-      for (const msg of investigationMessages) {
-        msg.acknowledged = true;
-        msg.acknowledgedBy = 'orchestrator';
+      // Mark messages as acknowledged by orchestrator
+      for (const msg of investigationMessages) {
+        msg.acknowledged = true;
+        msg.acknowledgedBy = 'orchestrator';
 
-        // Emit acknowledgment event
-        emitAgentEvent({
-          investigationId: state.investigation_id,
-          agentName: 'orchestrator',
-          phase: 'agent_acknowledged_message',
-          data: {
-            messageId: msg.id,
-            message: msg.message,
-            acknowledgedBy: 'orchestrator',
-            timestamp: now.toISOString(),
-          },
-          timestamp: now,
-        });
+        // Emit acknowledgment event
+        emitAgentEvent({
+          investigationId: state.investigation_id,
+          agentName: 'orchestrator',
+          phase: 'agent_acknowledged_message',
+          data: {
+            messageId: msg.id,
+            message: msg.message,
+            acknowledgedBy: 'orchestrator',
+            timestamp: now.toISOString(),
+          },
+          timestamp: now,
+        });
 
-        console.log(`[Orchestrator] ✅ Acknowledged user message ${msg.id}`);
-      }
+        console.log(`[Orchestrator] ✅ Acknowledged user message ${msg.id}`);
+      }
 
-      // Sync back to state
-      state.user_messages = globalState.user_messages;
+      // Sync back to state
+      state.user_messages = globalState.user_messages;
 
-      // Clean up acknowledged active_agent messages (retention policy)
-      globalState.user_messages = globalState.user_messages.filter(
-        (msg: any) => !(msg.scope === 'active_agent' && msg.acknowledged)
-      );
-    }
-  }
+      // Clean up acknowledged active_agent messages (retention policy)
+      globalState.user_messages = globalState.user_messages.filter(
+        (msg: any) => !(msg.scope === 'active_agent' && msg.acknowledged)
+      );
+    }
+  }
 
-  // Fetch whitelisted IOCs
-  const whitelistedIOCs = await getActiveWhitelistedIOCs();
-  const whitelistJSON = getWhitelistAsJSON(whitelistedIOCs);
-  const whitelistSection = whitelistedIOCs.length > 0
-    ? `\n\n=== WHITELISTED IOCs (KNOWN SAFE - ALREADY FILTERED) ===\n${whitelistJSON}\n\nNOTE: These IOCs have been filtered from agent findings and should not appear in reports.\n`
-    : '';
+  // Fetch whitelisted IOCs
+  const whitelistedIOCs = await getActiveWhitelistedIOCs();
+  const whitelistJSON = getWhitelistAsJSON(whitelistedIOCs);
+  const whitelistSection = whitelistedIOCs.length > 0
+    ? `\n\n=== WHITELISTED IOCs (KNOWN SAFE - ALREADY FILTERED) ===\n${whitelistJSON}\n\nNOTE: These IOCs have been filtered from agent findings and should not appear in reports.\n`
+    : '';
 
-  // Check context size before building prompt
-  const contextTokens = calculateContextTokens(
-    state.alert_data,
-    state.findings,
-    [],
-    state.conversation_history
-  );
+  // Check context size before building prompt
+  const contextTokens = calculateContextTokens(
+    state.alert_data,
+    state.findings,
+    [],
+    state.conversation_history
+  );
 
-  console.log(`[Orchestrator] Current context size: ${contextTokens.toLocaleString()} tokens`);
+  console.log(`[Orchestrator] Current context size: ${contextTokens.toLocaleString()} tokens`);
 
-  // If context exceeds threshold, we're in a critical state
-  const CRITICAL_THRESHOLD = 100000;
-  if (contextTokens > CRITICAL_THRESHOLD) {
-    console.log(`[Orchestrator] ⚠️  Context size exceeds critical threshold (${CRITICAL_THRESHOLD.toLocaleString()} tokens)`);
-    console.log(`[Orchestrator] Forcing investigation completion to prevent token overflow`);
+  // If context exceeds threshold, we're in a critical state
+  const CRITICAL_THRESHOLD = 100000;
+  if (contextTokens > CRITICAL_THRESHOLD) {
+    console.log(`[Orchestrator] ⚠️  Context size exceeds critical threshold (${CRITICAL_THRESHOLD.toLocaleString()} tokens)`);
+    console.log(`[Orchestrator] Forcing investigation completion to prevent token overflow`);
 
-    state.current_phase = 'synthesis';
-    state.next_steps = [];
+    state.current_phase = 'synthesis';
+    state.next_steps = [];
 
-    state.conversation_history.push({
-      role: 'system',
-      content: `Investigation context exceeded critical threshold (${contextTokens.toLocaleString()} tokens). Forcing synthesis phase.`,
-      timestamp: new Date(),
-      action: 'plan',
-    });
+    state.conversation_history.push({
+      role: 'system',
+      content: `Investigation context exceeded critical threshold (${contextTokens.toLocaleString()} tokens). Forcing synthesis phase.`,
+      timestamp: new Date(),
+      action: 'plan',
+    });
 
-    return;
-  }
+    return;
+  }
 
-  const reflectionPrompt = `
+  const reflectionPrompt = `
 You are the Orchestrator reviewing investigation progress.${whitelistSection}${userGuidanceSection}
 
 COMPLETED AGENTS: ${state.completed_agents.join(', ')}
@@ -1370,96 +1361,101 @@ Based on the findings, determine if:
 
 OUTPUT FORMAT (JSON):
 {
-  "assessment": "What we learned so far",
-  "complete": false,
-  "next_steps": ["agent_name"],
-  "reasoning": "Why these next steps (mention if re-running an agent and why)"
+  "assessment": "What we learned so far",
+  "complete": false,
+  "next_steps": ["agent_name"],
+  "reasoning": "Why these next steps (mention if re-running an agent and why)"
 }
 `;
 
-  const response = await client.chat([
-    { role: 'system', content: config.prompts.system },
-    { role: 'user', content: reflectionPrompt },
-  ]);
+  const response = await client.chat([
+    { role: 'system', content: config.prompts.system },
+    { role: 'user', content: reflectionPrompt },
+  ]);
 
-  const reflection = parseJSON(response.content);
+  const reflection = parseJSON(response.content);
 
-  // Update state based on orchestrator's reflection
-  if (reflection.complete) {
-    state.current_phase = 'synthesis';
-    state.next_steps = [];
-  } else if (reflection.next_steps) {
-    state.next_steps = reflection.next_steps;
-  }
+  // Update state based on orchestrator's reflection
+  if (reflection.complete) {
+    state.current_phase = 'synthesis';
+    state.next_steps = [];
+  } else if (reflection.next_steps) {
+    state.next_steps = reflection.next_steps;
+  }
 
-  state.conversation_history.push({
-    role: 'orchestrator',
-    content: `Reflection: ${reflection.assessment}. ${reflection.complete ? 'Investigation complete.' : `Next: ${reflection.next_steps?.join(', ')}`}`,
-    timestamp: new Date(),
-    action: 'plan',
-    metadata: reflection,
-  });
+  state.conversation_history.push({
+    role: 'orchestrator',
+    content: `Reflection: ${reflection.assessment}. ${reflection.complete ? 'Investigation complete.' : `Next: ${reflection.next_steps?.join(', ')}`}`,
+    timestamp: new Date(),
+    action: 'plan',
+    metadata: reflection,
+  });
 
-  console.log(`[Orchestrator] ${reflection.complete ? 'Investigation complete' : `Next steps: ${reflection.next_steps?.join(', ')}`}`);
+  console.log(`[Orchestrator] ${reflection.complete ? 'Investigation complete' : `Next steps: ${reflection.next_steps?.join(', ')}`}`);
 }
 
 /**
- * Build agent prompt with full context
- */
+ * Build agent prompt with full context
+ */
 async function buildAgentPrompt(config: AgentConfig, state: AgenticState, findings: any[]): Promise<string> {
-  // ... (No changes needed here, keeping logic as-is per instructions)
-  // Fetch whitelisted IOCs
-  const whitelistedIOCs = await getActiveWhitelistedIOCs();
-  // ... (rest of function omitted for brevity as per instructions, it is just prompt building) ...
-  // Re-inserting the function body from your provided code to be safe:
-  const whitelistJSON = getWhitelistAsJSON(whitelistedIOCs);
-  const whitelistSection = whitelistedIOCs.length > 0
-    ? `\n\n=== WHITELISTED IOCs (KNOWN SAFE - MUST EXCLUDE) ===\n\n${whitelistJSON}\n\nCRITICAL INSTRUCTION: The above IOCs are verified safe entities that MUST be completely excluded from your security analysis:\n- DO NOT investigate these users, IPs, domains, files, or hashes\n- DO NOT include them in your findings, analysis, or reports  \n- DO NOT flag them as suspicious or mention them as threats\n- These entities have been pre-approved and filtered for your safety\n- If you see activity from these IOCs, treat it as normal/benign baseline activity\n\nThese IOCs have already been filtered from your Splunk results, but if you encounter them in correlation analysis or pattern matching, you MUST skip them.\n`
-    : '';
+  // Fetch whitelisted IOCs
+  const whitelistedIOCs = await getActiveWhitelistedIOCs();
+  const whitelistJSON = getWhitelistAsJSON(whitelistedIOCs);
+  const whitelistSection = whitelistedIOCs.length > 0
+    ? `\n\n=== WHITELISTED IOCs (KNOWN SAFE - MUST EXCLUDE) ===\n\n${whitelistJSON}\n\nCRITICAL INSTRUCTION: The above IOCs are verified safe entities that MUST be completely excluded from your security analysis:\n- DO NOT investigate these users, IPs, domains, files, or hashes\n- DO NOT include them in your findings, analysis, or reports  \n- DO NOT flag them as suspicious or mention them as threats\n- These entities have been pre-approved and filtered for your safety\n- If you see activity from these IOCs, treat it as normal/benign baseline activity\n\nThese IOCs have already been filtered from your Splunk results, but if you encounter them in correlation analysis or pattern matching, you MUST skip them.\n`
+    : '';
 
-  const splunkReference = `\n\n=== SPLUNK INDEXES & SOURCETYPES AVAILABLE ===\n\nIndexes:\n- cloudtrail: AWS API activity, security auditing\n- vpcflow: Network traffic analysis, flow logs\n- linux: Linux security, Sysmon, auth logs\n- windows: Windows events, security logs\n- cloudwatch: ECS logs, Lambda, Bedrock AI\n- aws-metadata: EC2 metadata, resource inventory\n- loadbalancer: ELB access logs, web traffic\n- waf: AWS WAF logs\n- amazonq: Amazon Q invocation logs\n\nKey Source Types:\n- aws:cloudtrail (cloudtrail index): IAM activity, API calls\n- aws:cloudwatchlogs:vpcflow (vpcflow index): Network traffic\n- aws:cloudwatchlogs:ecs (cloudwatch index): Container logs\n- sysmon:linux (linux index): Process creation, network connections\n- linux_auth (linux index): SSH logins, sudo commands\n- XmlWinEventLog (windows index): Windows security events\n\nIMPORTANT FIELD EXTRACTION NOTES:\n- Most sourcetypes have PRE-EXTRACTED FIELDS that are immediately available\n- Use the DISCOVERED INDEX STRUCTURE section below for exact field names per sourcetype\n\nExample Queries (ALWAYS include earliest= and latest=):\n- index=cloudtrail eventName=ConsoleLogin earliest=-24h latest=now | table _time, userIdentity.userName, sourceIPAddress\n- index=vpcflow action=REJECT earliest=-7d latest=now | stats count by srcaddr, dstport\n- index=linux sourcetype=sysmon:linux EventID=1 earliest=-1h latest=now | table _time, Image, CommandLine\n- index=windows EventCode=4625 earliest=-24h latest=now | stats count by Account_Name\n\nCRITICAL SPLUNK TIME FORMAT RULES:\n1. ALWAYS use earliest= and latest= in ALL queries\n2. Relative time (PREFERRED): earliest=-24h, earliest=-7d, earliest=-30m, latest=now\n3. Snap to time: earliest=-24h@h (snap to hour), earliest=-d@d (snap to day start)\n4. Absolute time format: earliest="11/01/2025:00:00:00" latest="11/30/2025:23:59:59"\n    - Format MUST be: MM/DD/YYYY:HH:MM:SS (American format with colons)\n5. Epoch time: earliest=1698796800 latest=1701388799\n6. NEVER use ISO 8601 format (2025-11-01T00:00:00) - THIS IS INVALID\n\nExamples:\n- Last 24 hours: earliest=-24h latest=now\n- Last 7 days: earliest=-7d latest=now\n- Yesterday: earliest=-d@d latest=@d\n- Specific dates: earliest="11/01/2025:00:00:00" latest="11/30/2025:23:59:59"\n- This month: earliest=-mon@mon latest=now\n`;
+  const splunkReference = `\n\n=== SPLUNK INDEXES & SOURCETYPES AVAILABLE ===\n\nIndexes:\n- cloudtrail: AWS API activity, security auditing\n- vpcflow: Network traffic analysis, flow logs\n- linux: Linux security, Sysmon, auth logs\n- windows: Windows events, security logs\n- cloudwatch: ECS logs, Lambda, Bedrock AI\n- aws-metadata: EC2 metadata, resource inventory\n- loadbalancer: ELB access logs, web traffic\n- waf: AWS WAF logs\n- amazonq: Amazon Q invocation logs\n\nKey Source Types:\n- aws:cloudtrail (cloudtrail index): IAM activity, API calls\n- aws:cloudwatchlogs:vpcflow (vpcflow index): Network traffic\n- aws:cloudwatchlogs:ecs (cloudwatch index): Container logs\n- sysmon:linux (linux index): Process creation, network connections\n- linux_auth (linux index): SSH logins, sudo commands\n- XmlWinEventLog (windows index): Windows security events\n\nIMPORTANT FIELD EXTRACTION NOTES:\n- Most sourcetypes have PRE-EXTRACTED FIELDS that are immediately available\n- Use the DISCOVERED INDEX STRUCTURE section below for exact field names per sourcetype\n\nExample Queries (ALWAYS include earliest= and latest=):\n- index=cloudtrail eventName=ConsoleLogin earliest=-24h latest=now | table _time, userIdentity.userName, sourceIPAddress\n- index=vpcflow action=REJECT earliest=-7d latest=now | stats count by srcaddr, dstport\n- index=linux sourcetype=sysmon:linux EventID=1 earliest=-1h latest=now | table _time, Image, CommandLine\n- index=windows EventCode=4625 earliest=-24h latest=now | stats count by Account_Name\n\nCRITICAL SPLUNK TIME FORMAT RULES:\n1. ALWAYS use earliest= and latest= in ALL queries\n2. Relative time (PREFERRED): earliest=-24h, earliest=-7d, earliest=-30m, latest=now\n3. Snap to time: earliest=-24h@h (snap to hour), earliest=-d@d (snap to day start)\n4. Absolute time format: earliest="11/01/2025:00:00:00" latest="11/30/2025:23:59:59"\n    - Format MUST be: MM/DD/YYYY:HH:MM:SS (American format with colons)\n5. Epoch time: earliest=1698796800 latest=1701388799\n6. NEVER use ISO 8601 format (2025-11-01T00:00:00) - THIS IS INVALID\n\nExamples:\n- Last 24 hours: earliest=-24h latest=now\n- Last 7 days: earliest=-7d latest=now\n- Yesterday: earliest=-d@d latest=@d\n- Specific dates: earliest="11/01/2025:00:00:00" latest="11/30/2025:23:59:59"\n- This month: earliest=-mon@mon latest=now\n`;
 
-  let discoveredStructure = '';
-  try {
-    const splunkConfig = await prisma.splunkConfig.findFirst({
-      where: { isActive: true },
-      select: { indexStructure: true, structureFetchedAt: true },
-    });
+  let discoveredStructure = '';
+  try {
+    const splunkConfig = await prisma.splunkConfig.findFirst({
+      where: { isActive: true },
+      select: { indexStructure: true, structureFetchedAt: true },
+    });
 
-    if (splunkConfig?.indexStructure && splunkConfig.structureFetchedAt) {
-      const structure = splunkConfig.indexStructure as Record<string, Record<string, { fields: string[] }>>;
+    if (splunkConfig?.indexStructure && splunkConfig.structureFetchedAt) {
+      const structure = splunkConfig.indexStructure as Record<string, Record<string, { fields: string[] }>>;
 
-      discoveredStructure = `\n\n=== DISCOVERED INDEX STRUCTURE (Fetched: ${new Date(splunkConfig.structureFetchedAt).toLocaleString()}) ===\n\n`;
-      discoveredStructure += `This section contains actual indexes, sourcetypes, and EXTRACTED FIELDS from your Splunk instance.\n`;
-      discoveredStructure += `IMPORTANT: These fields are PRE-EXTRACTED by Splunk and available for immediate use in queries.\n`;
-      discoveredStructure += `DO NOT use rex or regex commands to extract these fields - they are already available!\n\n`;
+      discoveredStructure = `\n\n=== DISCOVERED INDEX STRUCTURE (Fetched: ${new Date(splunkConfig.structureFetchedAt).toLocaleString()}) ===\n\n`;
+      discoveredStructure += `This section contains actual indexes, sourcetypes, and EXTRACTED FIELDS from your Splunk instance.\n`;
+      discoveredStructure += `IMPORTANT: These fields are PRE-EXTRACTED by Splunk and available for immediate use in queries.\n`;
+      discoveredStructure += `DO NOT use rex or regex commands to extract these fields - they are already available!\n\n`;
 
-      for (const [index, sourcetypes] of Object.entries(structure)) {
-        discoveredStructure += `\nIndex: ${index}\n`;
-        discoveredStructure += `${'='.repeat(50)}\n`;
+      for (const [index, sourcetypes] of Object.entries(structure)) {
+        discoveredStructure += `\nIndex: ${index}\n`;
+        discoveredStructure += `${'='.repeat(50)}\n`;
 
-        for (const [sourcetype, data] of Object.entries(sourcetypes)) {
-          discoveredStructure += `\n  Sourcetype: ${sourcetype}\n`;
-          discoveredStructure += `  ${'-'.repeat(48)}\n`;
+        for (const [sourcetype, data] of Object.entries(sourcetypes)) {
+          discoveredStructure += `\n  Sourcetype: ${sourcetype}\n`;
+          discoveredStructure += `  ${'-'.repeat(48)}\n`;
 
-          if (data.fields && data.fields.length > 0) {
-            discoveredStructure += `  Extracted Fields (${data.fields.length}):\n`;
-            discoveredStructure += `  ${data.fields.join(', ')}\n`;
-          } else {
-            discoveredStructure += `  Extracted Fields: None found\n`;
-          }
-        }
-      }
+          if (data.fields && data.fields.length > 0) {
+            discoveredStructure += `  Extracted Fields (${data.fields.length}):\n`;
+            discoveredStructure += `  ${data.fields.join(', ')}\n`;
+          } else {
+            discoveredStructure += `  Extracted Fields: None found\n`;
+          }
+        }
+      }
 
-      discoveredStructure += `\n${'='.repeat(50)}\n`;
-      discoveredStructure += `CRITICAL: The fields listed above are ALREADY EXTRACTED. Use them directly in your queries.\n`;
-      discoveredStructure += `Example: index=vpcflow srcaddr="10.0.0.1" (NOT: index=vpcflow | rex "..." )\n`;
-    }
-  } catch (error) {
-    console.error('[Agentic Workflow] Error fetching index structure:', error);
-  }
+      discoveredStructure += `\n${'='.repeat(50)}\n`;
+      discoveredStructure += `CRITICAL: The fields listed above are ALREADY EXTRACTED. Use them directly in your queries.\n`;
+      discoveredStructure += `Example: index=vpcflow srcaddr="10.0.0.1" (NOT: index=vpcflow | rex "..." )\n`;
+    }
+  } catch (error) {
+    console.error('[Agentic Workflow] Error fetching index structure:', error);
+  }
 
-  return `
+  // =========================================================================
+  // FIX: PARROTING ISSUE 
+  // Determine if the last query triggered a need for refinement.
+  // We check this here so we can append the instructions OUTSIDE the JSON array.
+  // =========================================================================
+  const lastFinding = findings[findings.length - 1];
+  const needsRefinement = lastFinding && lastFinding.refinement_needed === true;
+
+  return `
 You are an autonomous ${config.name} agent. Your job is to investigate this security alert thoroughly.
 
 ALERT:
@@ -1494,8 +1490,8 @@ ACTION REQUIRED:
 ${findings.filter(f => f.action === 'query' && !f.skipped).length > 0 ? `
 QUERIES YOU HAVE ALREADY EXECUTED:
 ${findings.filter(f => f.action === 'query' && !f.skipped).map((f, i) =>
-    `${i + 1}. ${f.query?.substring(0, 150)}${f.query && f.query.length > 150 ? '...' : ''} (Iteration ${f.iteration}, ${f.results?.length || 0} results)`
-  ).join('\n')}
+    `${i + 1}. ${f.query?.substring(0, 150)}${f.query && f.query.length > 150 ? '...' : ''} (Iteration ${f.iteration}, ${f.results?.length || 0} results)`
+  ).join('\n')}
 
 ⚠️ CRITICAL: DO NOT repeat these exact queries. If you need more data, try:
 - Different time ranges (e.g., earlier or later periods)
@@ -1529,48 +1525,59 @@ SPLUNK QUERY RULES:
 - Use proper SPL syntax with pipes for filtering: field=value | head 100 | table fields
 - NEVER use "index" as a command - it's a field name, not a command: "index=cloudtrail" NOT "| index=*"
 - Common patterns:
-  * index=cloudtrail eventName="CreateAccessKey" | table _time, userIdentity.userName, sourceIPAddress
-  * index=vpcflow action=REJECT | stats count by src_ip, dest_port
-  * index=cloudwatch error OR exception | head 50
+  * index=cloudtrail eventName="CreateAccessKey" | table _time, userIdentity.userName, sourceIPAddress
+  * index=vpcflow action=REJECT | stats count by src_ip, dest_port
+  * index=cloudwatch error OR exception | head 50
 
 OUTPUT FORMAT (JSON):
 {
-  "action": "query" | "report",
-  "reasoning": "Your thought process and what you plan to do next",
-  "query": "SPL query WITHOUT 'search' prefix (REQUIRED if action=query)",
-  "finding": "What you discovered from previous queries",
-  "analysis": "Full analysis (REQUIRED if action=report)",
-  "confidence": 0.0-1.0,
-  "complete": true if satisfied
+  "action": "query" | "report",
+  "reasoning": "Your thought process and what you plan to do next",
+  "query": "SPL query WITHOUT 'search' prefix (REQUIRED if action=query)",
+  "finding": "What you discovered from previous queries",
+  "analysis": "Full analysis (REQUIRED if action=report)",
+  "confidence": 0.0-1.0,
+  "complete": true if satisfied
 }
 
-Be thorough. Query data as needed. Report when you have solid findings.
+${needsRefinement ? `
+🚨 SYSTEM CRITICAL DIRECTIVE 🚨
+Your last query returned TOO MUCH DATA. 
+You MUST output a NEW JSON object with action="query" and provide a MORE SPECIFIC query.
+Strategies to fix this:
+- Add specific filters (e.g. eventName="Login")
+- Reduce the time range (e.g. earliest=-1h)
+- Use aggregations (| stats count by ...)
+- Limit results (| head 50)
+
+DO NOT apologize or copy/paste these refinement instructions. ONLY output the requested JSON format.
+` : 'Be thorough. Query data as needed. Report when you have solid findings.'}
 `;
 }
 
 /**
- * Parse JSON from LLM response, handling various formats
- */
+ * Parse JSON from LLM response, handling various formats
+ */
 function parseJSON(content: string): any {
-  try {
-    // Try direct parse
-    return JSON.parse(content);
-  } catch {
-    // Extract from markdown code block
-    const jsonMatch = content.match(/```json\s*\n([\s\S]+?)\n```/) || content.match(/```\s*\n(\{[\s\S]+?\})\n```/);
-    if (jsonMatch) {
-      try {
-        return JSON.parse(jsonMatch[1]);
-      } catch { }
-    }
-    // Extract JSON object from text
-    const objectMatch = content.match(/\{[\s\S]*\}/);
-    if (objectMatch) {
-      try {
-        return JSON.parse(objectMatch[0]);
-      } catch { }
-    }
-    // Return as-is wrapped in object
-    return { analysis: content, raw: content };
-  }
+  try {
+    // Try direct parse
+    return JSON.parse(content);
+  } catch {
+    // Extract from markdown code block
+    const jsonMatch = content.match(/```json\s*\n([\s\S]+?)\n```/) || content.match(/```\s*\n(\{[\s\S]+?\})\n```/);
+    if (jsonMatch) {
+      try {
+        return JSON.parse(jsonMatch[1]);
+      } catch { }
+    }
+    // Extract JSON object from text
+    const objectMatch = content.match(/\{[\s\S]*\}/);
+    if (objectMatch) {
+      try {
+        return JSON.parse(objectMatch[0]);
+      } catch { }
+    }
+    // Return as-is wrapped in object
+    return { analysis: content, raw: content };
+  }
 }

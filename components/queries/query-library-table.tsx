@@ -2,8 +2,9 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { formatDistanceToNow } from 'date-fns';
-import { Eye, Search as SearchIcon, Play, TrendingUp } from 'lucide-react';
+import { Eye, Search as SearchIcon, Play, TrendingUp, Trash } from 'lucide-react';
 import {
   Table,
   TableBody,
@@ -81,9 +82,22 @@ const categoryLabels = {
 } as const;
 
 export function QueryLibraryTable({ queries, onExecute }: QueryLibraryTableProps) {
+  const router = useRouter();
   const [searchQuery, setSearchQuery] = useState('');
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
   const [sourceFilter, setSourceFilter] = useState<string>('all');
+
+  const handleDelete = async (id: string) => {
+    //const confirmed = confirm('Are you sure you want to delete this query?');
+    //if (!confirmed) return;
+
+    try {
+      await fetch(`/api/queries/${id}`, { method: 'DELETE' }); 
+      router.refresh();
+    } catch (error) {
+      console.error('Error deleting query:', error);
+    }
+  };
 
   const filteredQueries = queries.filter((query) => {
     const matchesSearch =
@@ -239,6 +253,14 @@ export function QueryLibraryTable({ queries, onExecute }: QueryLibraryTableProps
                         <Link href={`/queries/${query.id}`}>
                           <Eye className="h-4 w-4" />
                         </Link>
+                      </Button>
+                      <Button 
+                        variant="ghost" 
+                        size="sm" 
+                        onClick={() => handleDelete(query.id)}
+                        title="Delete query"
+                      >
+                        <Trash className="h-4 w-4 text-destructive hover:text-destructive" />
                       </Button>
                     </div>
                   </TableCell>

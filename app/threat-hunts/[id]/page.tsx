@@ -1,6 +1,6 @@
 import { notFound } from 'next/navigation';
 import { formatDistanceToNow } from 'date-fns';
-import { Target, AlertTriangle, Clock, Activity, IterationCw } from 'lucide-react';
+import { Target, AlertTriangle, Clock, Activity, IterationCw, ArrowLeft } from 'lucide-react';
 import { prisma } from '@/lib/db';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -15,9 +15,12 @@ import {
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { PageLayout } from '@/components/layout/page-layout';
-import { ArrowLeft } from 'lucide-react';
-// 1. IMPORT THE NEW BUTTON
 import { InvestigateFindingButton } from '@/components/threat-hunting/investigate-finding-button';
+import { AutoRefresh } from '@/components/auto-refresh';
+
+type Alert = {
+  id: string;
+};
 
 async function getThreatHunt(id: string) {
   try {
@@ -58,7 +61,7 @@ export default async function ThreatHuntDetailPage({
 }) {
   const { id } = await params;
   const hunt = await getThreatHunt(id);
-
+  
   if (!hunt) {
     notFound();
   }
@@ -93,6 +96,9 @@ export default async function ThreatHuntDetailPage({
 
   return (
     <PageLayout header={headerContent}>
+      {/* THIS IS THE NEW INVISIBLE AUTO-REFRESH COMPONENT */}
+      <AutoRefresh isActive={hunt.status === 'active'} intervalMs={5000} />
+
       <div className="space-y-6">
         <div>
           <p className="text-muted-foreground" suppressHydrationWarning>
@@ -121,7 +127,6 @@ export default async function ThreatHuntDetailPage({
             <div className="text-2xl font-bold">
               {findingsSummary.high}/{findingsSummary.critical}
             </div>
-       
           </CardContent>
         </Card>
 
@@ -145,7 +150,7 @@ export default async function ThreatHuntDetailPage({
           <CardContent>
             <div className="text-sm" suppressHydrationWarning>
               {hunt.lastRunAt
-                ?  formatDistanceToNow(new Date(hunt.startedAt), { addSuffix: true })
+                ?  formatDistanceToNow(new Date(hunt.lastRunAt), { addSuffix: true })
                 : 'No data'}
             </div>
           </CardContent>
@@ -255,9 +260,9 @@ export default async function ThreatHuntDetailPage({
                           {finding.findingType}
                         </TableCell>
                         <TableCell className="max-w-md">
-                          <div className="truncate" title={finding.description}>
+                          <Link href={`/alerts/${finding.alertId}`} className="block truncate hover:underline" title={finding.description}>
                             {finding.description}
-                          </div>
+                          </Link>
                         </TableCell>
                         <TableCell>
                           <Badge
@@ -284,8 +289,6 @@ export default async function ThreatHuntDetailPage({
                           })}
                         </TableCell>
                         <TableCell className="text-right">
-                          
-                          {/* 2. ADD THE CONDITIONAL RENDERING HERE */}
                           {finding.investigationId ? (
                             <Link href={`/investigations/${finding.investigationId}`}>
                               <Button variant="outline" size="sm">
@@ -295,8 +298,6 @@ export default async function ThreatHuntDetailPage({
                           ) : (
                             <InvestigateFindingButton findingId={finding.id} />
                           )}
-                          {/* ======================================= */}
-                          
                         </TableCell>
                       </TableRow>
                     );

@@ -31,14 +31,14 @@ export function QueryStatsCard({ stats }: QueryStatsCardProps) {
             {stats.totalExecutions > 0 ? `${Math.round(stats.successRate)}%` : 'N/A'}
           </div>
           <p className="text-xs text-muted-foreground">
-            Based on recent executions
+            Based on recent executions 
           </p>
         </CardContent>
       </Card>
 
       <Card>
         <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-          <CardTitle className="text-sm font-medium">Avg Execution Time</CardTitle>
+          <CardTitle className="text-sm font-medium">Avg Time</CardTitle>
           <Clock className="h-4 w-4 text-muted-foreground" />
         </CardHeader>
         <CardContent>

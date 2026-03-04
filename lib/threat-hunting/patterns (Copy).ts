@@ -59,11 +59,11 @@ export const DETECTION_PATTERNS: DetectionPattern[] = [
               values(user) as attempted_users,
               values(src) as source_ips,
               values(dest) as target_hosts,
-              earliest(_time) as first_seen,
-              latest(_time) as last_seen
+              earliest(_time) as first_attempt,
+              latest(_time) as last_attempt
         by src, dest
       | where failed_attempts > 10
-      | eval timespan=tostring(last_seen-first_seen, "duration")
+      | eval timespan=tostring(last_attempt-first_attempt, "duration")
       | sort - failed_attempts
     `.trim(),
     entityExtraction: {
@@ -371,10 +371,10 @@ export const DETECTION_PATTERNS: DetectionPattern[] = [
       | stats count as change_count,
               values(Member_Name) as added_members,
               values(Changed_By) as changed_by_users,
-              earliest(_time) as first_seen,
-              latest(_time) as last_seen
+              earliest(_time) as first_change,
+              latest(_time) as last_change
         by dest, Group_Name, privileged_group
-      | eval time_window = tostring(last_seen - first_seen, "duration")
+      | eval time_window = tostring(last_change - first_change, "duration")
       | sort - change_count
     `.trim(),
     entityExtraction: {
@@ -454,14 +454,12 @@ export const DETECTION_PATTERNS: DetectionPattern[] = [
     splunkQuery: `
       (index=* sourcetype=firewall action=allowed direction=outbound) OR
       (index=* sourcetype="XmlWinEventLog:Microsoft-Windows-Sysmon/Operational" EventCode=3)
-      | bucket _time span=10m
       | stats sum(bytes_out) as total_bytes_out,
               count as connection_count,
               values(DestinationIp) as dest_ips,
-              values(DestinationPort) as dest_ports,
-              earliest(_time) as first_seen,
-              latest(_time) as last_seen
-        by src, user
+              values(DestinationPort) as dest_ports
+        by src, user, _time
+      | bucket _time span=10m
       | where total_bytes_out > 104857600
       | eval data_volume_mb = round(total_bytes_out / 1048576, 2)
       | eval severity = case(

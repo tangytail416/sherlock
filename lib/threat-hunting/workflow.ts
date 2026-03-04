@@ -383,8 +383,9 @@ Review the "DISCOVERED INDEX STRUCTURE" in your system prompt and generate ONE o
 1. **MUST use ONLY** the indexes and sourcetypes from DISCOVERED INDEX STRUCTURE
 2. **MUST use ONLY** the extracted field names listed in DISCOVERED INDEX STRUCTURE
 3. **MUST include time range:** earliest=${timeRange.earliest} latest=${timeRange.latest}
-4. Apply appropriate filters and aggregations
-5. Follow Splunk best practices
+4. **CRITICAL RULE FOR TIMESTAMPS:** Whenever you use a transforming command like \`| stats\` or \`| chart\`, you MUST preserve the timestamp by including \`earliest(_time) as first_seen, latest(_time) as last_seen\` in the aggregation. Example: \`| stats count, earliest(_time) as first_seen, latest(_time) as last_seen by src_ip\`. If you use \`| table\`, you MUST make \`_time\` the very first column.
+5. Apply appropriate filters and aggregations
+6. Follow Splunk best practices
 
 **DO NOT** make assumptions about index/sourcetype/field names. Use only what's in the structure.
 
@@ -393,7 +394,7 @@ Review the "DISCOVERED INDEX STRUCTURE" in your system prompt and generate ONE o
 Respond with ONLY the Splunk query. No explanations, no markdown code blocks. Just the pure SPL query.
 
 Example:
-index=windows sourcetype=WinEventLog:Security EventCode=4625 earliest=${timeRange.earliest} latest=${timeRange.latest} | stats count by src_ip, user | where count > 10 | sort - count
+index=windows sourcetype=WinEventLog:Security EventCode=4625 earliest=${timeRange.earliest} latest=${timeRange.latest} | stats count, earliest(_time) as first_seen, latest(_time) as last_seen by src_ip, user | where count > 10 | sort - count
 
 Generate query now:
 `.trim();
@@ -506,7 +507,7 @@ JSON ONLY:
   "findings": [
     {
       "finding_type": "${objective.id}",
-      "description": "What was detected",
+      "description": "What was detected (MUST explicitly state the first_seen and last_seen timestamps)",
       "severity": "critical|high|medium|low",
       "confidence": 0.85,
       "affected_entities": {
@@ -516,7 +517,10 @@ JSON ONLY:
         "processes": []
       },
       "mitre_attack": [],
-      "raw_indicators": {}
+      "raw_indicators": {
+         "first_seen": "extracted timestamp",
+         "last_seen": "extracted timestamp"
+      }
     }
   ],
   "summary": {
@@ -804,9 +808,6 @@ function parseAgentOutput(response: string): ThreatHunterOutput | null {
   }
 }
 
-/**
- * Deduplicate findings and add metadata
- */
 /**
  * Deduplicate findings and add metadata
  */
@@ -1130,8 +1131,10 @@ async function loadSplunkStructure(): Promise<string> {
  * Extract Splunk query from agent response
  */
 function extractQueryFromResponse(response: string): string | null {
-  // Try to find query in code blocks first
-  const codeBlockMatch = response.match(/```(?:spl|splunk)?\n?([\s\S]+?)\n?```/);
+  // Try to find query in code blocks first using regex (avoids markdown parsing bugs)
+  const codeBlockRegex = new RegExp('\\x60{3}(?:spl|splunk)?\\n?([\\s\\S]+?)\\n?\\x60{3}');
+  const codeBlockMatch = response.match(codeBlockRegex);
+  
   if (codeBlockMatch) {
     return codeBlockMatch[1].trim();
   }

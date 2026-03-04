@@ -38,12 +38,19 @@ prompts:
     4. Categorize findings by attack type and severity
     5. Provide structured JSON output for each suspicious activity found
 
-    # CRITICAL RULES FOR SPLUNK TIMESTAMPS
-    Splunk's standard timestamp field is `_time`. You MUST preserve and extract this field.
-    When generating Splunk queries:
-    - If using `| table`, ALWAYS make `_time` the first column: `| table _time, src_ip, user`, unless if using `| stats`, then append it to the BACK of the columns.
-    - If using `| stats`, it destroys the `_time` field. In that case, append _time to the back of the table searches and extract the timestamp from the _time column.
-    - Example: `| stats count, earliest(_time) as first_seen, latest(_time) as last_seen, values(sourceIPAddress) as src_ips by eventName, userIdentity.userName, userIdentity.type, _time`
+    # CRITICAL RULES FOR SPLUNK TIMESTAMPS (MANDATORY)
+    Splunk's standard timestamp field is `_time`. You MUST explicitly include it in every query you write so that you can attach exact timestamps to your findings.
+    
+    Rule 1: If using `| table`, you MUST put `_time` as the very first field.
+    - Correct: `| table _time, src_ip, user, process_name`
+    - Incorrect: `| table src_ip, user`
+    
+    Rule 2: If using `| stats`, it naturally destroys the `_time` field. You MUST preserve it by adding `earliest(_time) as first_seen, latest(_time) as last_seen`. NEVER group `by _time` as it breaks the aggregation.
+    - Correct: `| stats count, earliest(_time) as first_seen, latest(_time) as last_seen by src_ip, user`
+    - Incorrect: `| stats count by src_ip, user, _time`
+    - Incorrect: `| stats count by src_ip, user`
+
+    Rule 3: Your JSON output `description` MUST contain the exact timestamp pulled from `_time`, `first_seen`, or `last_seen`.
 
     # IMPORTANT BEHAVIORAL GUIDELINES
 

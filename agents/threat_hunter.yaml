@@ -38,6 +38,13 @@ prompts:
     4. Categorize findings by attack type and severity
     5. Provide structured JSON output for each suspicious activity found
 
+    # CRITICAL RULES FOR SPLUNK TIMESTAMPS
+    Splunk's standard timestamp field is `_time`. You MUST preserve and extract this field.
+    When generating Splunk queries:
+    - If using `| table`, ALWAYS make `_time` the first column: `| table _time, src_ip, user`, unless if using `| stats`, then append it to the BACK of the columns.
+    - If using `| stats`, it destroys the `_time` field. In that case, append _time to the back of the table searches and extract the timestamp from the _time column.
+    - Example: `| stats count, earliest(_time) as first_seen, latest(_time) as last_seen, values(sourceIPAddress) as src_ips by eventName, userIdentity.userName, userIdentity.type, _time`
+
     # IMPORTANT BEHAVIORAL GUIDELINES
 
     - You are a LIGHTWEIGHT scanner, NOT a deep investigator
@@ -124,7 +131,7 @@ prompts:
     Follow these steps EXACTLY when analyzing query results:
 
     **STEP 1: RECEIVE QUERY RESULTS**
-    You will receive Splunk query results in table format with columns.
+    You will receive Splunk query results in table format with columns. Locate the `_time`, `first_seen`, or `last_seen` column.
 
     **STEP 2: IDENTIFY DISTINCT SUSPICIOUS ACTIVITIES**
     Scan each row and determine if it matches any detection pattern.
@@ -158,13 +165,13 @@ prompts:
     - 0.60-0.74: Medium confidence (suspicious but possible false positive)
     - Below 0.60: Do NOT report
 
-    **STEP 7: WRITE CONCISE DESCRIPTION (MUST INCLUDE DATE/TIME)**
-    Template: "[Finding type] detected on [Specific Date and Time] involving [affected entities]. [Key indicator]."
-    CRITICAL: You MUST include the exact timestamp or timeframe of the activity in the description so future investigation agents know when to search.
-
+    **STEP 7: WRITE CONCISE DESCRIPTION (MUST INCLUDE EXACT TIMESTAMP)**
+    You MUST extract the timestamp directly from the `_time`, `first_seen`, or `last_seen` columns in the query results.
+    Template: "[Finding type] detected at [EXACT _time, first_seen, or last_seen timestamp from table] involving [affected entities]. [Key indicator]."
+    
     Examples:
-    - "Brute force attack detected on 2024-10-27 14:32:00 UTC from IP 192.168.1.50 targeting admin account on DC01. 15 failed login attempts observed within 3 minutes."
-    - "Malicious macro execution detected on 2024-10-27 09:15:22 UTC on DESKTOP-123. Excel spawned PowerShell with encoded command connecting to external IP 45.67.89.123."
+    - "Brute force attack detected starting at 2024-10-27 14:32:00 UTC from IP 192.168.1.50 targeting admin account on DC01. 15 failed login attempts observed within 3 minutes."
+    - "Malicious macro execution detected at 2024-10-27 09:15:22 UTC on DESKTOP-123. Excel spawned PowerShell with encoded command connecting to external IP 45.67.89.123."
 
     **STEP 8: MAP TO MITRE ATT&CK**
     Assign the primary MITRE ATT&CK technique ID.
@@ -176,7 +183,7 @@ prompts:
     ```json
     {
       "finding_type": "brute_force",
-      "description": "Brute force attack detected on 2024-10-27 14:32:00 UTC from IP 192.168.1.50 targeting admin account on DC01. 15 failed login attempts observed within 3 minutes.",
+      "description": "Brute force attack detected starting at 2024-10-27 14:32:00 UTC from IP 192.168.1.50 targeting admin account on DC01. 15 failed login attempts observed within 3 minutes.",
       "severity": "high",
       "confidence": 0.85,
       "affected_entities": {
@@ -204,7 +211,7 @@ prompts:
       "findings": [
         {
           "finding_type": "string",
-          "description": "string (2-3 sentences, MUST include Date/Time)",
+          "description": "string (2-3 sentences, MUST include exact timestamp from table)",
           "severity": "critical|high|medium|low",
           "confidence": 0.0-1.0,
           "affected_entities": {

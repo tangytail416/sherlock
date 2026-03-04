@@ -63,21 +63,18 @@ splunk_queries:
         | search CommandLine="*-enc*" OR CommandLine="*-encodedcommand*" OR CommandLine="*bypass*" OR CommandLine="*hidden*"
         | table _time, ComputerName, Account_Name, CommandLine
         | sort -_time
-        | head 20
 
     - name: "Find process creation events (Sysmon Event ID 1)"
       spl: |
         index=windows sourcetype=XmlWinEventLog EventCode=4688
         | stats count by New_Process_Name, Creator_Process_Name
         | sort -count
-        | head 20
 
     - name: "Detect Linux Sysmon process creation"
       spl: |
         index=linux sourcetype=sysmon:linux EventID=1
         | table _time, Image, CommandLine, User, ParentImage
         | sort -_time
-        | head 20
 
     - name: "Find suspicious parent-child process relationships"
       spl: |
@@ -86,7 +83,6 @@ splunk_queries:
           AND match(New_Process_Name, "(?i)(cmd|powershell|wscript|cscript|mshta)")
         | table _time, ComputerName, Creator_Process_Name, New_Process_Name, CommandLine
         | sort -_time
-        | head 20
 
     - name: "Detect LOLBin abuse (certutil, bitsadmin, etc.)"
       spl: |
@@ -94,7 +90,6 @@ splunk_queries:
         | search New_Process_Name IN ("*certutil*", "*bitsadmin*", "*mshta*", "*rundll32*", "*regsvr32*")
         | table _time, ComputerName, New_Process_Name, CommandLine
         | sort -_time
-        | head 20
 
     - name: "Find network connections (Sysmon Event ID 3)"
       spl: |
@@ -102,7 +97,6 @@ splunk_queries:
         | where NOT (DestinationPort IN (80, 443))
         | table _time, Image, DestinationIp, DestinationPort, User
         | sort -_time
-        | head 20
 
     - name: "Detect file creation in suspicious locations"
       spl: |
@@ -110,21 +104,18 @@ splunk_queries:
         | where match(TargetFilename, "(?i)(/tmp/|/dev/shm/|/var/tmp/)")
         | table _time, Image, TargetFilename, User
         | sort -_time
-        | head 20
 
     - name: "Find command execution history"
       spl: |
         index=linux sourcetype=bash_history
         | stats count by user, command
         | sort -count
-        | head 20
 
     - name: "Detect Windows service installation (persistence)"
       spl: |
         index=windows sourcetype=XmlWinEventLog (EventCode=4697 OR EventCode=7045)
         | table _time, ComputerName, Service_Name, Service_File_Name, Account_Name
         | sort -_time
-        | head 20
 
     - name: "Find registry modifications (persistence, config changes)"
       spl: |
@@ -132,7 +123,6 @@ splunk_queries:
         | where match(Object_Name, "(?i)(Run|RunOnce|CurrentVersion)")
         | table _time, ComputerName, Account_Name, Object_Name, New_Value
         | sort -_time
-        | head 20
 
   key_fields:
     windows:
@@ -159,18 +149,6 @@ prompts:
   system: |
     You are the Endpoint Behavior Agent, an expert in Windows endpoint forensics.
     You investigate suspicious processes, command executions, and system changes.
-
-    === SPLUNK QUERY DATA LIMITS (CRITICAL) ===
-    You have a strict token limit for processing query results. If you return too much data, the system will crash.
-    You MUST adhere to these rules when writing or modifying Splunk queries:
-    1. NEVER use `values()` or `list()` on high-volume logs like IPs, ports, or filenames. It creates massive arrays.
-    2. ALWAYS use `dc()` (distinct count) to see how many unique entities exist without printing them all.
-    3. If you need specific examples, use `top limit=10` or `stats count by X | head 10`.
-    4. ALWAYS append `| head 20` to any stats or table command to limit the rows returned. Do not output unbounded tables.
-
-    === CRITICAL TIME RANGE RULES ===
-    1. If the provided alert does NOT specify an exact timestamp, you MUST default to `earliest=-120d latest=now` for ALL your queries.
-    2. Endpoint behavior investigations require a wide historical baseline to uncover slow-moving threats or persistence mechanisms. Do NOT use `-24h`, `-2h`, or `-7d` unless explicitly instructed to do so.
 
     === LOLBINS (LIVING OFF THE LAND BINARIES) KNOWLEDGE BASE ===
     LOLBins are legitimate Windows binaries that attackers abuse for malicious purposes.
@@ -485,7 +463,6 @@ queries:
     earliest={start_time} latest={end_time}
     | eval process_chain=ParentImage+"→"+Image
     | stats count by process_chain, CommandLine, User
-    | head 20
     
   powershell_analysis: |
     index=endpoint sourcetype="WinEventLog:Microsoft-Windows-PowerShell/Operational"
@@ -494,7 +471,6 @@ queries:
     | rex field=ScriptBlockText "(?<suspicious_keywords>IEX|Invoke-Expression|downloadstring|webclient|Net\.WebClient)"
     | where isnotnull(suspicious_keywords)
     | table _time Computer ScriptBlockText
-    | head 20
     
   network_connections: |
     index=endpoint sourcetype=sysmon EventCode=3
@@ -502,8 +478,6 @@ queries:
     Image="*{process_name}*"
     earliest={start_time} latest={end_time}
     | stats count by DestinationIp, DestinationPort, DestinationHostname
-    | sort -count
-    | head 20
     
   file_modifications: |
     index=endpoint sourcetype=sysmon EventCode=11
@@ -511,8 +485,6 @@ queries:
     earliest={start_time} latest={end_time}
     | stats count by TargetFilename, Image, User
     | where TargetFilename NOT like "C:\\Windows\\Temp\\%"
-    | sort -count
-    | head 20
     
   registry_changes: |
     index=endpoint sourcetype=sysmon EventCode=13
@@ -520,7 +492,6 @@ queries:
     earliest={start_time} latest={end_time}
     | search TargetObject="*\\Run*" OR TargetObject="*\\RunOnce*" OR TargetObject="*\\Services\\*"
     | table _time TargetObject Details Image
-    | head 20
     
   scheduled_tasks: |
     index=endpoint sourcetype=sysmon EventCode=1
@@ -528,7 +499,6 @@ queries:
     Image="*schtasks.exe*" OR Image="*at.exe*"
     earliest={start_time} latest={end_time}
     | table _time User CommandLine
-    | head 20
 
 output_schema:
   type: mixed

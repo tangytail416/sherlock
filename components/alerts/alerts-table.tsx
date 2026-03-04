@@ -4,7 +4,7 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { formatDistanceToNow } from 'date-fns';
-import { Eye, Search as SearchIcon, Trash } from 'lucide-react';
+import { Eye, Search as SearchIcon, Trash, CheckCircle } from 'lucide-react';
 import {
   Table,
   TableBody,
@@ -59,7 +59,7 @@ export function AlertsTable({ alerts }: AlertsTableProps) {
   const [statusFilter, setStatusFilter] = useState<string>('all');
 
   const handleDelete = async (id: string) => {
-    //const confirmed = confirm('Are you sure you want to delete this alert?');
+    //const confirmed = confirm('Are you sure you want to completely delete this alert and its reports?');
     //if (!confirmed) return;
 
     try {
@@ -67,6 +67,16 @@ export function AlertsTable({ alerts }: AlertsTableProps) {
       router.refresh(); 
     } catch (error) {
       console.error('Error deleting alert:', error);
+    }
+  };
+
+  // NEW: Function to mark alert as resolved
+  const handleResolve = async (id: string) => {
+    try {
+      await fetch(`/api/alerts/${id}/resolve`, { method: 'POST' });
+      router.refresh(); 
+    } catch (error) {
+      console.error('Error resolving alert:', error);
     }
   };
 
@@ -153,10 +163,11 @@ export function AlertsTable({ alerts }: AlertsTableProps) {
                       {alert.severity}
                     </Badge>
                   </TableCell>
-                  <TableCell className="font-medium">
+                  <TableCell className="font-medium max-w-[250px]">
                     <Link 
                       href={`/alerts/${alert.id}`}
-                      className="hover:underline text-foreground"
+                      className="block truncate hover:underline text-foreground"
+                      title={alert.title}
                     >
                       {alert.title}
                     </Link>
@@ -184,14 +195,34 @@ export function AlertsTable({ alerts }: AlertsTableProps) {
                     {formatDistanceToNow(new Date(alert.timestamp), { addSuffix: true })}
                   </TableCell>
                   <TableCell className="text-right">
-                    <Button asChild variant="ghost" size="sm">
-                      <Link href={`/alerts/${alert.id}`}>
-                        <Eye className="h-4 w-4" />
-                      </Link>
-                    </Button>
-                    <Button variant="ghost" size="sm" onClick={() => handleDelete(alert.id)}>
-                        <Trash className="h-4 w-4" />
-                    </Button>
+                    <div className="flex justify-end gap-2">
+                      <Button asChild variant="ghost" size="sm" title="View details">
+                        <Link href={`/alerts/${alert.id}`}>
+                          <Eye className="h-4 w-4" />
+                        </Link>
+                      </Button>
+                      
+                      {/* NEW: Resolve Button */}
+                      {alert.status !== 'resolved' && (
+                        <Button 
+                          variant="ghost" 
+                          size="sm" 
+                          onClick={() => handleResolve(alert.id)}
+                          title="Mark as resolved"
+                        >
+                          <CheckCircle className="h-4 w-4 text-green-600 hover:text-green-700" />
+                        </Button>
+                      )}
+
+                      <Button 
+                        variant="ghost" 
+                        size="sm" 
+                        onClick={() => handleDelete(alert.id)}
+                        title="Delete completely"
+                      >
+                          <Trash className="h-4 w-4 text-destructive hover:text-destructive" />
+                      </Button>
+                    </div>
                   </TableCell>
                 </TableRow>
               ))

@@ -69,19 +69,6 @@ prompts:
     3. Hostnames/computers
     4. File hashes (MD5, SHA1, SHA256)
 
-    === SPLUNK QUERY DATA LIMITS (CRITICAL) ===
-    You have a strict token limit for processing query results. If you return too much data, the system will crash.
-    You MUST adhere to these rules when writing or modifying Splunk queries:
-    1. NEVER use `values(src_ip)`, `values(dest_ip)`, or `values(dest_port)` on high-volume logs. It creates massive arrays.
-    2. ALWAYS use `dc(src_ip)` (distinct count) to see how many unique entities exist without printing them all.
-    3. If you need specific examples of IPs/Ports, use `top limit=10 src_ip` or `stats count by src_ip | head 10`.
-    4. Do NOT group by high-cardinality fields like `bytes`. Use `sum(bytes)` instead.
-    5. ALWAYS append `| head 20` to any stats/table command to limit the rows returned.
-
-    === CRITICAL TIME RANGE RULES ===
-    1. If the provided alert does NOT specify an exact timestamp, you MUST default to `earliest=-120d latest=now` for ALL your queries. 
-    2. Context enrichment requires a wide baseline. Do NOT use `-7d` or `-24h` or `-30d` unless explicitly told to.
-
     === LEVERAGING HISTORICAL INTELLIGENCE ===
     BEFORE conducting your detailed enrichment, review the HISTORICAL INTELLIGENCE section in your investigation context:
 
@@ -109,7 +96,7 @@ prompts:
       - Fields to retrieve: department, title, manager, location, account_created_date, employee_id, status
       - If user not found in directory: set confidence=0.3, flag "unknown_user"=TRUE
 
-    STEP 2 - Query Splunk for logon baseline (last 120 days):
+    STEP 2 - Query Splunk for logon baseline (last 30 days):
       - Use predefined query: user_historical_activity
       - Calculate typical logon patterns:
         * Count unique source IPs
@@ -157,7 +144,7 @@ prompts:
       - Retrieve: country, city, region, ASN, organization
       - Store for geographic anomaly detection
 
-    STEP 4 - Query Splunk for IP history (last 120 days):
+    STEP 4 - Query Splunk for IP history (last 30 days):
       - Use predefined query: ip_reputation
       - Count total connections from this IP
       - IF count > 100: ip_is_known=TRUE, add 0.2 to confidence
@@ -171,7 +158,7 @@ prompts:
 
     STEP 2 - Query Splunk for recent security events:
       - Use predefined query: hostname_profile
-      - Look for prior malware detections, failed logins, anomalies in past 120 days
+      - Look for prior malware detections, failed logins, anomalies in past 7 days
       - IF prior_security_incidents found: set risk_indicator=TRUE, increase risk_score by 0.4
       - ELSE: risk_indicator=FALSE
 
@@ -318,17 +305,16 @@ queries:
     query: |
       index=windows OR index=authentication
       user={username}
-      earliest=-120d
+      earliest=-30d
       | stats count by sourcetype, action, src_ip
       | sort -count
-      | head 20
     purpose: "Establish user's normal logon IP address and activity baseline"
     expected_results: "List of source IPs with event counts, sorted by frequency"
     interpretation:
       - "First row (highest count) = user's most common logon IP"
       - "If unique source IPs < 3: user has very consistent logon pattern"
       - "If unique source IPs > 10: user has variable logon pattern (may be legitimate for remote/traveling workers)"
-      - "If current alert IP NOT in results: significant deviation from 120-day baseline"
+      - "If current alert IP NOT in results: significant deviation from 30-day baseline"
     decision_logic:
       - condition: "current_ip equals top result src_ip"
         conclusion: "IP is user's primary/normal logon location"
@@ -351,11 +337,9 @@ queries:
     query: |
       index=network OR index=proxy OR index=firewall
       src_ip={ip_address} OR dest_ip={ip_address}
-      earliest=-120d
-      | stats count, sum(bytes) as total_bytes by action, dest_port
-      | sort -count
-      | head 20
-    purpose: "Determine if IP address has been seen before in network logs without crashing context limits"
+      earliest=-30d
+      | stats count by action, dest_port, bytes
+    purpose: "Determine if IP address has been seen before in network logs"
     expected_results: "Network activity summary for this IP (actions, ports, data transferred)"
     interpretation:
       - "If count > 100: IP is well-known/frequently seen in environment"
@@ -384,10 +368,9 @@ queries:
   hostname_profile:
     query: |
       index=* host={hostname}
-      earliest=-120d
+      earliest=-7d
       | stats count by sourcetype, user
       | sort -count
-      | head 20
     purpose: "Get recent activity summary for hostname to detect anomalies"
     expected_results: "Event types and users associated with this host in past week"
     interpretation:
@@ -418,8 +401,6 @@ queries:
       index=endpoint sourcetype=av OR sourcetype=edr
       file_hash={hash}
       | stats count by action, user, host
-      | sort -count
-      | head 20
     purpose: "Determine file hash prevalence across organization"
     expected_results: "Hosts and users that have encountered this file hash"
     interpretation:

@@ -99,7 +99,6 @@ export function InvestigationDetailClient({ id }: { id: string }) {
         const res = await fetch(`/api/investigations/${id}`);
         if (!res.ok) throw new Error('Failed to fetch investigation');
         const data = await res.json();
-		console.log('67676767676767676767676767677');
         setInvestigation(data);
       } catch (error) {
         console.error('Error fetching investigation:', error);
@@ -151,7 +150,7 @@ export function InvestigationDetailClient({ id }: { id: string }) {
         </Button>
         <div>
           <h1 className="text-xl md:text-2xl lg:text-3xl font-bold tracking-tight">
-            Investigation {investigation.id.slice(0, 8)}
+            Investigation
           </h1>
           <p className="text-xs md:text-sm text-muted-foreground">
             {formatDistanceToNow(new Date(investigation.createdAt), { addSuffix: true })}

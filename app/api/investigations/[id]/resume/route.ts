@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { executeAgenticWorkflow } from '@/lib/agents/agentic-workflow';
+import { getAIProviderFromDB } from '@/lib/ai';
 
 // POST /api/investigations/[id]/resume - Resume a failed/incomplete investigation
 export async function POST(
@@ -49,11 +50,18 @@ export async function POST(
       },
     });
 
+    // Get AI provider - use saved one, or fallback to DB default, then to glm
+    let aiProvider = investigation.aiProvider;
+    if (!aiProvider) {
+      const dbProvider = await getAIProviderFromDB();
+      aiProvider = dbProvider?.type || 'glm';
+    }
+
     // Resume investigation in the background
     resumeInvestigation(
       id,
       investigation.alert,
-      investigation.aiProvider || 'openrouter',
+      aiProvider,
       investigation.findings || {}
     ).catch((error) => {
       console.error('Error resuming investigation:', error);

@@ -4,6 +4,7 @@ import { createInvestigationSchema } from '@/lib/validations/investigation';
 import { loadAllAgentConfigs, shouldTriggerAgent } from '@/lib/agents/config-loader';
 import { executeAgent } from '@/lib/agents/executor';
 import { executeAgenticWorkflow } from '@/lib/agents/agentic-workflow';
+import { getAIProviderFromDB } from '@/lib/ai';
 
 // GET /api/investigations - List all investigations
 export async function GET(request: NextRequest) {
@@ -76,41 +77,67 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Alert not found' }, { status: 404 });
     }
 
-    // Check if ANY non-completed investigation already exists for this alert
+    // Check if an investigation already exists for this alert with pending/investigating/failed status
     const existingInvestigation = await prisma.investigation.findFirst({
       where: {
         alertId: validatedData.alertId,
         status: {
-          in: ['pending', 'active', 'running', 'stopped', 'failed']
+          in: ['pending', 'investigating', 'failed'],
         },
       },
       orderBy: { createdAt: 'desc' },
     });
 
     if (existingInvestigation) {
-      console.log(`Existing investigation request detected for alert ${validatedData.alertId}, returning existing investigation ${existingInvestigation.id}`);
-      
-      // === FIX: IF IT IS PENDING, STOPPED, OR FAILED, START IT NOW ===
-      if (['pending', 'stopped', 'failed'].includes(existingInvestigation.status)) {
-        console.log(`Investigation is currently ${existingInvestigation.status}. Kickstarting workflow...`);
-        
-        // Ensure alert is marked as investigating
+      if (existingInvestigation.status === 'failed') {
+        // Restart failed investigation
+        console.log(`Restarting failed investigation ${existingInvestigation.id} for alert ${validatedData.alertId}`);
+
+        const updatedInvestigation = await prisma.investigation.update({
+          where: { id: existingInvestigation.id },
+          data: { 
+            status: 'pending',
+            completedAt: null,
+            errorMessage: null,
+          },
+          include: { alert: true },
+        });
+
+        // Update alert status
         await prisma.alert.update({
           where: { id: validatedData.alertId },
           data: { status: 'investigating' },
         });
 
-        // Trigger the workflow in the background
-        triggerAgentExecution(existingInvestigation.id, alert, existingInvestigation.aiProvider || validatedData.aiProvider).catch((error) => {
+        // Trigger agent execution for restart
+        const aiProvider = validatedData.aiProvider || existingInvestigation.aiProvider;
+        triggerAgentExecution(updatedInvestigation.id, alert, aiProvider).catch((error) => {
+          console.error('Error triggering agent restart:', error);
+        });
+
+        return NextResponse.json(updatedInvestigation);
+      } else if (existingInvestigation.status === 'pending') {
+        // Start pending investigation
+        console.log(`Starting pending investigation ${existingInvestigation.id} for alert ${validatedData.alertId}`);
+
+        // Update alert status
+        await prisma.alert.update({
+          where: { id: validatedData.alertId },
+          data: { status: 'investigating' },
+        });
+
+        // Trigger agent execution
+        const aiProvider = validatedData.aiProvider || existingInvestigation.aiProvider;
+        triggerAgentExecution(existingInvestigation.id, alert, aiProvider).catch((error) => {
           console.error('Error triggering agent execution:', error);
         });
 
-        // Optimistically update the status for the frontend response
-        existingInvestigation.status = 'active';
+        return NextResponse.json(existingInvestigation);
+      } else {
+        // Return investigating (already running)
+        console.log(`Investigation already running for alert ${validatedData.alertId}, returning existing: ${existingInvestigation.id}`);
+        return NextResponse.json(existingInvestigation);
       }
-      // ===============================================================
-
-      return NextResponse.json(existingInvestigation, { status: 200 });
     }
 
     // Get default AI provider if not specified
@@ -154,10 +181,7 @@ export async function POST(request: NextRequest) {
       data: { status: 'investigating' },
     });
 
-    // Automatically trigger agent execution in the background
-    triggerAgentExecution(investigation.id, alert, aiProvider).catch((error) => {
-      console.error('Error triggering agent execution:', error);
-    });
+    // Investigation is created but not auto-started - user can start manually
 
     return NextResponse.json(investigation, { status: 201 });
   } catch (error) {
@@ -188,9 +212,14 @@ async function triggerAgentExecution(investigationId: string, alert: any, aiProv
       data: { status: 'active' },
     });
 
-    const effectiveAiProvider = aiProvider || investigation.aiProvider || 'openrouter';
+    // Get AI provider - use saved one, or fallback to DB default, then to glm
+    let effectiveAiProvider = aiProvider || investigation.aiProvider;
+    if (!effectiveAiProvider) {
+      const dbProvider = await getAIProviderFromDB();
+      effectiveAiProvider = dbProvider?.type || 'glm';
+    }
 
-    console.log(`[Investigation] Starting agentic workflow for ${investigationId}`);
+    console.log(`[Investigation] Starting agentic workflow for ${investigationId} with provider: ${effectiveAiProvider}`);
 
     // Use the new agentic workflow
     await executeAgenticWorkflow(investigationId, alert, effectiveAiProvider);

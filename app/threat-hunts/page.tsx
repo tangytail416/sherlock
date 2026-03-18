@@ -3,9 +3,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { formatDistanceToNow } from 'date-fns';
-
-import { Target, Plus, Pause, Play, Trash, Square, Eye, IterationCw } from 'lucide-react';
-
+import { Eye, Plus, Pause, Play, Trash2, Square, IterationCw } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -24,6 +22,16 @@ import {
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { ThreatHuntForm } from '@/components/threat-hunting/hunt-form';
 
 interface ThreatHunt {
@@ -54,6 +62,8 @@ export default function ThreatHuntsPage() {
   const [hunts, setHunts] = useState<ThreatHunt[]>([]);
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
 
   const fetchHunts = async () => {
     try {
@@ -73,16 +83,28 @@ export default function ThreatHuntsPage() {
     return () => clearInterval(interval);
   }, []);
 
+  const handleToggleHunt = async (id: string, currentStatus: string) => {
+    try {
+      if (currentStatus === 'active') {
+        await fetch(`/api/threat-hunts/${id}/pause`, { method: 'POST' });
+      } else if (currentStatus === 'paused') {
+        await fetch(`/api/threat-hunts/${id}/resume`, { method: 'POST' });
+      }
+      fetchHunts();
+    } catch (error) {
+      console.error('Error toggling hunt status:', error);
+    }
+  };
+
   const handleStopHunt = async (id: string) => {
     try {
-      await fetch(`/api/threat-hunts/${id}/sotp`, { method: 'POST' }); // dont fix the typo
+      await fetch(`/api/threat-hunts/${id}/stop`, { method: 'POST' });
       fetchHunts();
     } catch (error) {
       console.error('Error stopping hunt:', error);
     }
   };
-
-  // ADDED: Handler to restart a threat hunt
+  
   const handleRestartHunt = async (id: string) => {
     try {
       await fetch(`/api/threat-hunts/${id}/restart`, { method: 'POST' });
@@ -91,19 +113,29 @@ export default function ThreatHuntsPage() {
       console.error('Error restarting hunt:', error);
     }
   };
+  
+  const handleDeleteClick = (id: string) => {
+    setSelectedId(id);
+    setDeleteDialogOpen(true);
+  };
 
-  const handleDeleteHunt = async (id: string) => {
-    const confirmed = confirm('Are you sure you want to delete this threat hunt?');
-
-    if (!confirmed) return;
+  const handleDeleteConfirm = async () => {
+    if (!selectedId) return;
 
     try {
-      await fetch(`/api/threat-hunts/${id}`, {
-        method: 'DELETE',
-      });
-      fetchHunts();
+      const res = await fetch(`/api/threat-hunts/${selectedId}`, { method: 'DELETE' });
+      if (res.ok) {
+        setDeleteDialogOpen(false);
+        setSelectedId(null);
+        fetchHunts();
+      } else {
+        const data = await res.json();
+        console.error('Delete failed:', data.error || 'Unknown error');
+        alert(`Failed to delete hunt: ${data.error || 'Unknown error'}`);
+      }
     } catch (error) {
       console.error('Error deleting hunt:', error);
+      alert('Error deleting hunt. Check console for details.');
     }
   };
 
@@ -130,7 +162,7 @@ export default function ThreatHuntsPage() {
           <DialogTrigger asChild>
             <Button>
               <Plus className="mr-2 h-4 w-4" />
-              Start new hunt
+              New Hunt
             </Button>
           </DialogTrigger>
           <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
@@ -163,7 +195,7 @@ export default function ThreatHuntsPage() {
             {hunts.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={8} className="text-center text-muted-foreground">
-                  No recorded threat hunts.
+                  No threat hunts yet. Start your first hunt to discover threats.
                 </TableCell>
               </TableRow>
             ) : (
@@ -226,9 +258,7 @@ export default function ThreatHuntsPage() {
                   </TableCell>
                   <TableCell className="text-right">
                     <div className="flex justify-end gap-2">
-                      
-                      {/* ADDED: Restart button shown only if status is NOT active */}
-                      {hunt.status !== 'active' && (
+					{hunt.status !== 'active' && (
                         <Button
                           variant="outline"
                           size="sm"
@@ -238,32 +268,53 @@ export default function ThreatHuntsPage() {
                           Restart
                         </Button>
                       )}
-
                       <Link href={`/threat-hunts/${hunt.id}`}>
-                        <Button variant="outline" size="sm">
+                        <Button variant="outline" size="sm" className="w-[90px]">
                           <Eye className="mr-1 h-3 w-3" />
                           View
                         </Button>
                       </Link>
-
                       {hunt.status === 'active' && (
                         <Button
                           variant="outline"
                           size="sm"
-                          onClick={() => handleStopHunt(hunt.id)}
+                          className="w-[90px]"
+                          onClick={() => handleToggleHunt(hunt.id, hunt.status)}
                         >
-                          <Square className="mr-1 h-3 w-3" />
-                          Stop
+                          <Pause className="mr-1 h-3 w-3" />
+                          Pause
                         </Button>
                       )}
-                      
-                      {hunt.status !== 'active' && (
+                      {hunt.status === 'paused' && (
+                        <>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="w-[90px]"
+                            onClick={() => handleToggleHunt(hunt.id, hunt.status)}
+                          >
+                            <Play className="mr-1 h-3 w-3" />
+                            Resume
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="w-[90px]"
+                            onClick={() => handleStopHunt(hunt.id)}
+                          >
+                            <Square className="mr-1 h-3 w-3" />
+                            Stop
+                          </Button>
+                        </>
+                      )}
+                      {(hunt.status === 'completed' || hunt.status === 'failed') && (
                         <Button
                           variant="outline"
                           size="sm"
-                          onClick={() => handleDeleteHunt(hunt.id)}
+                          className="w-[90px]"
+                          onClick={() => handleDeleteClick(hunt.id)}
                         >
-                          <Trash className="mr-1 h-3 w-3" />
+                          <Trash2 className="mr-1 h-3 w-3" />
                           Delete
                         </Button>
                       )}
@@ -276,6 +327,24 @@ export default function ThreatHuntsPage() {
         </Table>
       </div>
       </div>
+
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Are you sure?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently delete this threat hunt and all its findings. This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDeleteConfirm} className="bg-red-600 hover:bg-red-700">
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

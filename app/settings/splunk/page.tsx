@@ -121,8 +121,8 @@ export default function SplunkSettingsPage() {
       return;
     }
 
-    if (authMethod === 'basic' && !username) {
-      toast.error('Username is required');
+    if (authMethod === 'basic' && (!username || !password)) {
+      toast.error('Username and password are required');
       return;
     }
 
@@ -172,8 +172,8 @@ export default function SplunkSettingsPage() {
       return;
     }
 
-    if (authMethod === 'basic' && !username) {
-      toast.error('Usernameare required');
+    if (authMethod === 'basic' && (!username || !password)) {
+      toast.error('Username and password are required');
       return;
     }
 

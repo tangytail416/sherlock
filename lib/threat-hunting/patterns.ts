@@ -59,11 +59,13 @@ export const DETECTION_PATTERNS: DetectionPattern[] = [
               values(user) as attempted_users,
               values(src) as source_ips,
               values(dest) as target_hosts,
-              earliest(_time) as first_seen,
-              latest(_time) as last_seen
+              earliest(_time) as first_attempt,
+              latest(_time) as last_attempt
         by src, dest
+		| eval human_first_seen=strftime(first_attempt, "%Y-%m-%d %H:%M:%S UTC")
+		| eval human_last_seen=strftime(last_attempt, "%Y-%m-%d %H:%M:%S UTC")
       | where failed_attempts > 10
-      | eval timespan=tostring(last_seen-first_seen, "duration")
+      | eval timespan=tostring(last_attempt-first_attempt, "duration")
       | sort - failed_attempts
     `.trim(),
     entityExtraction: {
@@ -106,6 +108,8 @@ export const DETECTION_PATTERNS: DetectionPattern[] = [
               earliest(_time) as first_seen,
               latest(_time) as last_seen
         by user, dest
+		| eval human_first_seen=strftime(first_seen, "%Y-%m-%d %H:%M:%S UTC")
+		| eval human_last_seen=strftime(last_seen, "%Y-%m-%d %H:%M:%S UTC")
       | where failures > 5 AND successes > 0
       | eval risk_score = case(
           failures > 20, "critical",
@@ -148,6 +152,8 @@ export const DETECTION_PATTERNS: DetectionPattern[] = [
                    last(lat) as prev_lat,
                    last(lon) as prev_lon
         by user
+		| eval human_first_seen=strftime(_time, "%Y-%m-%d %H:%M:%S UTC")
+		| eval human_last_seen=strftime(_time, "%Y-%m-%d %H:%M:%S UTC")
       | where location != prev_location AND prev_location != ""
       | eval time_diff_hours = round((_time - prev_time) / 3600, 2)
       | eval distance_km = round(sqrt(pow((lat - prev_lat) * 111, 2) + pow((lon - prev_lon) * 85, 2)), 0)
@@ -211,6 +217,8 @@ export const DETECTION_PATTERNS: DetectionPattern[] = [
               earliest(_time) as first_seen,
               latest(_time) as last_seen
         by ComputerName, Image, suspicious_patterns
+		| eval human_first_seen=strftime(first_seen, "%Y-%m-%d %H:%M:%S UTC")
+		| eval human_last_seen=strftime(last_seen, "%Y-%m-%d %H:%M:%S UTC")
       | sort - execution_count
     `.trim(),
     entityExtraction: {
@@ -261,6 +269,8 @@ export const DETECTION_PATTERNS: DetectionPattern[] = [
           backtick_count > 5, "Excessive backticks",
           1=1, null()
         )
+		| eval human_first_seen=strftime(_time, "%Y-%m-%d %H:%M:%S UTC")
+		| eval human_last_seen=strftime(_time, "%Y-%m-%d %H:%M:%S UTC")
       | where obfuscation_score > 10 OR obfuscation_indicators != ""
       | table _time, ComputerName, User, CommandLine, obfuscation_score, obfuscation_indicators
       | sort - obfuscation_score
@@ -317,6 +327,8 @@ export const DETECTION_PATTERNS: DetectionPattern[] = [
               earliest(_time) as first_seen,
               latest(_time) as last_seen
         by ComputerName, Image, suspicious_indicator
+		| eval human_first_seen=strftime(first_seen, "%Y-%m-%d %H:%M:%S UTC")
+		| eval human_last_seen=strftime(last_seen, "%Y-%m-%d %H:%M:%S UTC")
       | eval connection_pattern = case(
           connection_count > 100, "High frequency (possible beaconing)",
           connection_count > 10, "Medium frequency",
@@ -371,10 +383,12 @@ export const DETECTION_PATTERNS: DetectionPattern[] = [
       | stats count as change_count,
               values(Member_Name) as added_members,
               values(Changed_By) as changed_by_users,
-              earliest(_time) as first_seen,
-              latest(_time) as last_seen
+              earliest(_time) as first_change,
+              latest(_time) as last_change
         by dest, Group_Name, privileged_group
-      | eval time_window = tostring(last_seen - first_seen, "duration")
+		| eval human_first_seen=strftime(first_change, "%Y-%m-%d %H:%M:%S UTC")
+		| eval human_last_seen=strftime(last_change, "%Y-%m-%d %H:%M:%S UTC")
+      | eval time_window = tostring(last_change - first_change, "duration")
       | sort - change_count
     `.trim(),
     entityExtraction: {
@@ -413,6 +427,8 @@ export const DETECTION_PATTERNS: DetectionPattern[] = [
               earliest(_time) as first_seen,
               latest(_time) as last_seen
         by ComputerName, Account_Name, Account_Whose_Credentials_Were_Used
+		| eval human_first_seen=strftime(first_seen, "%Y-%m-%d %H:%M:%S UTC")
+		| eval human_last_seen=strftime(last_seen, "%Y-%m-%d %H:%M:%S UTC")
       | eval suspicious = case(
           runas_count > 10, "High frequency",
           match(processes, "(?i)powershell|cmd|wmi"), "Shell execution",
@@ -454,14 +470,14 @@ export const DETECTION_PATTERNS: DetectionPattern[] = [
     splunkQuery: `
       (index=* sourcetype=firewall action=allowed direction=outbound) OR
       (index=* sourcetype="XmlWinEventLog:Microsoft-Windows-Sysmon/Operational" EventCode=3)
-      | bucket _time span=10m
       | stats sum(bytes_out) as total_bytes_out,
               count as connection_count,
               values(DestinationIp) as dest_ips,
-              values(DestinationPort) as dest_ports,
-              earliest(_time) as first_seen,
-              latest(_time) as last_seen
-        by src, user
+              values(DestinationPort) as dest_ports
+        by src, user, _time
+		| eval human_first_seen=strftime(_time, "%Y-%m-%d %H:%M:%S UTC")
+		| eval human_last_seen=strftime(_time, "%Y-%m-%d %H:%M:%S UTC")
+      | bucket _time span=10m
       | where total_bytes_out > 104857600
       | eval data_volume_mb = round(total_bytes_out / 1048576, 2)
       | eval severity = case(
@@ -523,6 +539,8 @@ export const DETECTION_PATTERNS: DetectionPattern[] = [
               earliest(_time) as first_seen,
               latest(_time) as last_seen
         by ComputerName, Image, suspicious_location
+		| eval human_first_seen=strftime(first_seen, "%Y-%m-%d %H:%M:%S UTC")
+		| eval human_last_seen=strftime(last_seen, "%Y-%m-%d %H:%M:%S UTC")
       | sort - file_count
     `.trim(),
     entityExtraction: {

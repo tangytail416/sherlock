@@ -1,7 +1,9 @@
-import { notFound } from 'next/navigation';
+'use client';
+
+import { useState, useEffect } from 'react';
+import { useParams } from 'next/navigation';
 import { formatDistanceToNow } from 'date-fns';
-import { Target, AlertTriangle, Clock, Activity, IterationCw, ArrowLeft } from 'lucide-react';
-import { prisma } from '@/lib/db';
+import { Target, AlertTriangle, Clock, Activity, Eye, Loader2, ArrowLeft } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import {
@@ -15,36 +17,14 @@ import {
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { PageLayout } from '@/components/layout/page-layout';
-import { InvestigateFindingButton } from '@/components/threat-hunting/investigate-finding-button';
-import { AutoRefresh } from '@/components/auto-refresh';
-
-type Alert = {
-  id: string;
-};
-
-async function getThreatHunt(id: string) {
-  try {
-    const hunt = await prisma.threatHunt.findUnique({
-      where: { id },
-      include: {
-        findings: {
-          orderBy: { detectedAt: 'desc' },
-          take: 100,
-        },
-      },
-    });
-    return hunt;
-  } catch (error) {
-    console.error('Error fetching threat hunt:', error);
-    return null;
-  }
-}
+import { CreateInvestigationButton } from '@/components/threat-hunting/create-investigation-button';
 
 const statusColors = {
   active: 'default',
   completed: 'secondary',
   failed: 'destructive',
   paused: 'outline',
+  pending: 'outline',
 } as const;
 
 const severityColors = {
@@ -54,24 +34,73 @@ const severityColors = {
   low: 'secondary',
 } as const;
 
-export default async function ThreatHuntDetailPage({
-  params,
-}: {
-  params: Promise<{ id: string }>;
-}) {
-  const { id } = await params;
-  const hunt = await getThreatHunt(id);
-  
-  if (!hunt) {
-    notFound();
+export default function ThreatHuntDetailPage() {
+  const params = useParams();
+  const id = params.id as string;
+
+  const [hunt, setHunt] = useState<any>(null);
+  const [isLoading, setIsLoading] = useState(true);
+
+  // Real-time polling logic
+  useEffect(() => {
+    let isMounted = true;
+    let pollInterval: NodeJS.Timeout;
+
+    const fetchHunt = async () => {
+      try {
+        const res = await fetch(`/api/threat-hunts/${id}`);
+        if (res.ok && isMounted) {
+          const data = await res.json();
+          setHunt(data);
+
+          // If the hunt is finished, stop polling the API
+          if (data.status === 'completed' || data.status === 'failed' || data.status === 'error') {
+            clearInterval(pollInterval);
+          }
+        }
+      } catch (error) {
+        console.error('Error fetching threat hunt:', error);
+      } finally {
+        if (isMounted) setIsLoading(false);
+      }
+    };
+
+    // Initial fetch
+    fetchHunt();
+    
+    // Poll every 3 seconds for new findings
+    pollInterval = setInterval(fetchHunt, 3000);
+
+    return () => {
+      isMounted = false;
+      clearInterval(pollInterval);
+    };
+  }, [id]);
+
+  if (isLoading) {
+    return (
+      <PageLayout header={<div className="h-10"></div>}>
+        <div className="flex justify-center items-center py-24">
+          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+        </div>
+      </PageLayout>
+    );
   }
 
-  const config = hunt.config as any;
+  if (!hunt) {
+    return (
+      <PageLayout header={<div className="h-10"></div>}>
+        <div className="text-center py-12 text-muted-foreground">Threat hunt not found.</div>
+      </PageLayout>
+    );
+  }
+
+  const config = hunt.config || {};
   const findingsSummary = {
-    critical: hunt.findings.filter((f) => f.severity === 'critical').length,
-    high: hunt.findings.filter((f) => f.severity === 'high').length,
-    medium: hunt.findings.filter((f) => f.severity === 'medium').length,
-    low: hunt.findings.filter((f) => f.severity === 'low').length,
+    critical: hunt.findings?.filter((f: any) => f.severity === 'critical').length || 0,
+    high: hunt.findings?.filter((f: any) => f.severity === 'high').length || 0,
+    medium: hunt.findings?.filter((f: any) => f.severity === 'medium').length || 0,
+    low: hunt.findings?.filter((f: any) => f.severity === 'low').length || 0,
   };
 
   const headerContent = (
@@ -89,6 +118,12 @@ export default async function ThreatHuntDetailPage({
           <Badge variant={statusColors[hunt.status as keyof typeof statusColors] || 'default'}>
             {hunt.status}
           </Badge>
+          {hunt.status === 'active' && (
+            <span className="flex h-3 w-3 ml-2">
+              <span className="animate-ping absolute inline-flex h-3 w-3 rounded-full bg-green-400 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-3 w-3 bg-green-500"></span>
+            </span>
+          )}
         </div>
       </div>
     </div>
@@ -96,9 +131,6 @@ export default async function ThreatHuntDetailPage({
 
   return (
     <PageLayout header={headerContent}>
-      {/* THIS IS THE NEW INVISIBLE AUTO-REFRESH COMPONENT */}
-      <AutoRefresh isActive={hunt.status === 'active'} intervalMs={5000} />
-
       <div className="space-y-6">
         <div>
           <p className="text-muted-foreground" suppressHydrationWarning>
@@ -110,8 +142,8 @@ export default async function ThreatHuntDetailPage({
       <div className="grid gap-4 md:grid-cols-4">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">All Findings</CardTitle>
-            <AlertTriangle className="h-4 w-4 text-xl" />
+            <CardTitle className="text-sm font-medium">Total Findings</CardTitle>
+            <AlertTriangle className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">{hunt.findingsCount}</div>
@@ -120,20 +152,23 @@ export default async function ThreatHuntDetailPage({
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">High/Critical</CardTitle>
+            <CardTitle className="text-sm font-medium">Critical/High</CardTitle>
             <AlertTriangle className="h-4 w-4 text-destructive" />
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">
-              {findingsSummary.high}/{findingsSummary.critical}
+              {findingsSummary.critical + findingsSummary.high}
             </div>
+            <p className="text-xs text-muted-foreground mt-1">
+              {findingsSummary.critical} critical, {findingsSummary.high} high
+            </p>
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Cycles Run</CardTitle>
-            <IterationCw className="h-4 w-4 text-muted-foreground" />
+            <CardTitle className="text-sm font-medium">Hunt Cycles</CardTitle>
+            <Activity className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">
@@ -150,8 +185,8 @@ export default async function ThreatHuntDetailPage({
           <CardContent>
             <div className="text-sm" suppressHydrationWarning>
               {hunt.lastRunAt
-                ?  formatDistanceToNow(new Date(hunt.lastRunAt), { addSuffix: true })
-                : 'No data'}
+                ? formatDistanceToNow(new Date(hunt.lastRunAt), { addSuffix: true })
+                : 'Not yet run'}
             </div>
           </CardContent>
         </Card>
@@ -195,7 +230,7 @@ export default async function ThreatHuntDetailPage({
                     </Badge>
                   ))
                 ) : (
-                  <span className="text-sm text-muted-foreground">All areas</span>
+                  <span className="text-sm mt-1">All areas</span>
                 )}
               </div>
             </div>
@@ -214,6 +249,12 @@ export default async function ThreatHuntDetailPage({
                 )}
               </div>
             </div>
+		<div>
+              <div className="text-sm font-medium text-muted-foreground">CTI</div>
+              <div className="mt-1 text-sm">
+                {config.cti}
+              </div>
+            </div>
           </div>
         </CardContent>
       </Card>
@@ -227,9 +268,9 @@ export default async function ThreatHuntDetailPage({
           </CardDescription>
         </CardHeader>
         <CardContent>
-          {hunt.findings.length === 0 ? (
+          {!hunt.findings || hunt.findings.length === 0 ? (
             <div className="text-center py-8 text-muted-foreground">
-              Nothing to show here yet
+              {hunt.status === 'active' ? 'No findings yet. Hunt is in progress...' : 'No findings were discovered during this hunt.'}
             </div>
           ) : (
             <div className="rounded-md border">
@@ -246,7 +287,7 @@ export default async function ThreatHuntDetailPage({
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {hunt.findings.map((finding) => {
+                  {hunt.findings.map((finding: any) => {
                     const entities = finding.affectedEntities as any;
                     const entityCount =
                       (entities.users?.length || 0) +
@@ -260,9 +301,20 @@ export default async function ThreatHuntDetailPage({
                           {finding.findingType}
                         </TableCell>
                         <TableCell className="max-w-md">
-                          <Link href={`/alerts/${finding.alertId}`} className="block truncate hover:underline" title={finding.description}>
-                            {finding.description}
-                          </Link>
+                          {/* CHANGED TO LINK HERE */}
+                          {finding.alertId ? (
+                            <Link 
+                              href={`/alerts/${finding.alertId}`} 
+                              className="block truncate hover:underline text-foreground" 
+                              title={finding.description}
+                            >
+                              {finding.description}
+                            </Link>
+                          ) : (
+                            <div className="truncate" title={finding.description}>
+                              {finding.description}
+                            </div>
+                          )}
                         </TableCell>
                         <TableCell>
                           <Badge
@@ -279,9 +331,20 @@ export default async function ThreatHuntDetailPage({
                           </div>
                         </TableCell>
                         <TableCell>
-                          <Badge variant="outline" className="text-xs">
-                            {finding.status}
-                          </Badge>
+                          {finding.investigationStatus ? (
+                            <Badge 
+                              variant={
+                                statusColors[finding.investigationStatus as keyof typeof statusColors] || 'outline'
+                              }
+                              className="text-xs"
+                            >
+                              {finding.investigationStatus}
+                            </Badge>
+                          ) : (
+                            <Badge variant="outline" className="text-xs">
+                              {finding.status}
+                            </Badge>
+                          )}
                         </TableCell>
                         <TableCell className="text-sm text-muted-foreground" suppressHydrationWarning>
                           {formatDistanceToNow(new Date(finding.detectedAt), {
@@ -290,13 +353,23 @@ export default async function ThreatHuntDetailPage({
                         </TableCell>
                         <TableCell className="text-right">
                           {finding.investigationId ? (
-                            <Link href={`/investigations/${finding.investigationId}`}>
-                              <Button variant="outline" size="sm">
-                                View Investigation
-                              </Button>
-                            </Link>
+                            <div className="flex justify-end">
+                              <Link href={`/investigations/${finding.investigationId}`}>
+                                <Button variant="outline" size="sm" className="min-w-[180px]">
+                                  <span className="flex items-center">
+                                    <Eye className="h-4 w-4 mr-2" />
+                                    View Investigation
+                                  </span>
+                                </Button>
+                              </Link>
+                            </div>
                           ) : (
-                            <InvestigateFindingButton findingId={finding.id} />
+                            <div className="flex justify-end">
+                              <CreateInvestigationButton
+                                threatHuntId={id}
+                                findingId={finding.id}
+                              />
+                            </div>
                           )}
                         </TableCell>
                       </TableRow>

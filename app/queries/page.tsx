@@ -2,14 +2,15 @@ import Link from 'next/link';
 import { Plus, Database } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { QueryLibraryTable } from '@/components/queries/query-library-table';
+import { DeleteAllButton } from '@/components/queries/delete-all-button';
 import { prisma } from '@/lib/db';
 import { Card, CardContent } from '@/components/ui/card';
-// 1. IMPORT THE NEW BUTTON
-import { DeleteAllQueriesButton } from '@/components/queries/delete-all-queries-button';
 
-async function getQueries() {
+async function getQueries(take: number = 10, skip: number = 0) {
   try {
     const queries = await prisma.savedQuery.findMany({
+      take,
+      skip,
       orderBy: { lastExecutedAt: 'desc' },
       include: {
         _count: {
@@ -33,14 +34,18 @@ async function getStats() {
       await Promise.all([
         prisma.savedQuery.count(),
         prisma.savedQuery.count({ where: { isAutomated: true } }),
-        prisma.threatFinding.count({ where: { savedQueryId: { not: null } } }),
+        prisma.savedQuery.aggregate({
+          _sum: {
+            findingsCount: true,
+          },
+        }),
         prisma.queryExecution.count(),
       ]);
 
     return {
       totalQueries,
       automatedQueries,
-      totalFindings,
+      totalFindings: totalFindings._sum.findingsCount || 0,
       totalExecutions,
     };
   } catch (error) {
@@ -54,8 +59,15 @@ async function getStats() {
   }
 }
 
-export default async function QueriesPage() {
-  const queries = await getQueries();
+export default async function QueriesPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ limit?: string; offset?: string }>;
+}) {
+  const params = await searchParams;
+  const limit = parseInt(params.limit || '10');
+  const offset = parseInt(params.offset || '0');
+  const queries = await getQueries(limit, offset);
   const stats = await getStats();
 
   return (
@@ -68,11 +80,8 @@ export default async function QueriesPage() {
             Browse and manage Splunk queries from agents and manual entries
           </p>
         </div>
-        
-        {/* 2. PLACE THE BUTTONS IN A FLEX CONTAINER SO THEY SIT NEXT TO EACH OTHER */}
         <div className="flex items-center gap-2">
-          <DeleteAllQueriesButton />
-          
+          <DeleteAllButton queryCount={stats.totalQueries} />
           <Button asChild>
             <Link href="/queries/new">
               <Plus className="h-4 w-4 mr-2" />
@@ -141,7 +150,12 @@ export default async function QueriesPage() {
         </Card>
       </div>
 
-      <QueryLibraryTable queries={queries} />
+      <QueryLibraryTable 
+        queries={queries} 
+        totalCount={stats.totalQueries}
+        currentOffset={offset}
+        currentLimit={limit}
+      />
       </div>
     </div>
   );

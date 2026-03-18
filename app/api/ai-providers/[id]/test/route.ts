@@ -25,7 +25,7 @@ export async function POST(
     const OpenAI = (await import('openai')).default;
 
     const client = new OpenAI({
-      apiKey: config?.apiKey || undefined,
+      apiKey: config?.apiKey || '',
       baseURL: provider.baseUrl || undefined,
     });
 

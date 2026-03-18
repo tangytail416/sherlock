@@ -312,7 +312,7 @@ Provide a detailed analysis based on your capabilities: {capabilities}
         splunkSection += 'No results found\n\n';
       } else {
         splunkSection += `Results (${results.length} entries):\n`;
-        splunkSection += JSON.stringify(results, null, 2) + '\n\n';
+        splunkSection += JSON.stringify(results) + '\n\n';
       }
     }
   } else {
@@ -338,7 +338,7 @@ Provide a detailed analysis based on your capabilities: {capabilities}
   const entitiesStr = entities.length > 0 ? entities.join(', ') : 'See alert data below';
 
   // Build context/details from alert
-  const alertContext = alertData.description || JSON.stringify(alertData.rawData || {}, null, 2);
+  const alertContext = alertData.description || JSON.stringify(alertData.rawData || {});
 
   // Format previous results properly - handle both objects and arrays
   let previousResultsStr = 'None';
@@ -346,7 +346,7 @@ Provide a detailed analysis based on your capabilities: {capabilities}
     previousResultsStr = '';
     for (const [agentName, result] of Object.entries(context.previousResults)) {
       previousResultsStr += `\n=== ${agentName.toUpperCase()} RESULTS ===\n`;
-      previousResultsStr += JSON.stringify(result, null, 2) + '\n';
+      previousResultsStr += JSON.stringify(result) + '\n';
     }
   }
 
@@ -371,7 +371,7 @@ Provide a detailed analysis based on your capabilities: {capabilities}
         }
       }
     }
-    allEventsStr = JSON.stringify(events, null, 2);
+    allEventsStr = JSON.stringify(events);
   }
 
   // Build IOCs list from previous results for case correlation
@@ -474,7 +474,7 @@ Provide a detailed analysis based on your capabilities: {capabilities}
 
   // Replace all template variables
   return template
-    .replace(/\{alert_data\}/g, JSON.stringify(alertData, null, 2))
+    .replace(/\{alert_data\}/g, JSON.stringify(alertData))
     .replace(/\{splunk_data\}/g, splunkSection)
     .replace(/\{previous_results\}/g, previousResultsStr)
     .replace(/\{capabilities\}/g, config.capabilities.join(', '))

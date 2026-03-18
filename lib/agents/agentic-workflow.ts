@@ -1,7 +1,8 @@
 /**
  * Agentic Workflow Implementation
  * Based on ReAct (Reasoning + Acting) pattern with Supervisor orchestration
- * * Architecture:
+ * 
+ * Architecture:
  * 1. Orchestrator (Supervisor) - Routes tasks and receives feedback
  * 2. Specialist Agents (Workers) - Autonomous investigation with tool calling
  * 3. Reflection Loop - Agents report findings back to orchestrator
@@ -265,6 +266,16 @@ export async function executeAgenticWorkflow(
     console.warn('[Agentic Workflow] Failed to auto-save queries:', error);
   }
 
+  // Update investigation status in Neo4j graph
+  // Note: Investigation nodes were removed in refactor, so this is no longer needed
+  // try {
+  //   const { updateInvestigationStatus } = await import('@/lib/memory/graph-memory');
+  //   await updateInvestigationStatus(investigationId, 'completed');
+  //   console.log('[Agentic Workflow] Investigation status updated in Neo4j');
+  // } catch (error) {
+  //   console.warn('[Agentic Workflow] Failed to update investigation status in graph:', error);
+  // }
+
   // Mark investigation as completed
   await prisma.investigation.update({
     where: { id: investigationId },
@@ -374,18 +385,12 @@ OUTPUT FORMAT (JSON):
 
   const plan = parseJSON(response.content);
 
-  // FIX: Ensure next_steps is an array before usage
-  // The LLM might return undefined, null, or a non-array, so we sanitize it here.
-  const safeNextSteps = Array.isArray(plan.next_steps) ? plan.next_steps : [];
-
   // Update state
-  state.next_steps = safeNextSteps;
+  state.next_steps = plan.next_steps || [];
   state.current_phase = 'investigation';
-  
-  // SAFE LOGGING: Use safeNextSteps for the join operation
   state.conversation_history.push({
     role: 'orchestrator',
-    content: `Investigation Plan: ${plan.reasoning || 'No reasoning provided'}. Next steps: ${safeNextSteps.join(' → ')}`,
+    content: `Investigation Plan: ${plan.reasoning}. Next steps: ${plan.next_steps.join(' → ')}`,
     timestamp: new Date(),
     action: 'plan',
     metadata: plan,
@@ -403,7 +408,7 @@ OUTPUT FORMAT (JSON):
     },
   });
 
-  console.log(`[Orchestrator] Plan created: ${safeNextSteps.join(' → ')}`);
+  console.log(`[Orchestrator] Plan created: ${plan.next_steps.join(' → ')}`);
 }
 
 /**
@@ -422,26 +427,6 @@ async function executeSpecialistAgent(
     console.error(`[Agent: ${agentName}] Config not found`);
     return;
   }
-
-  // === FIX START: PRIORITIZE DB CONFIG FOR MAX TOKENS ===
-  // Fetch the active AI provider config from DB to get the user's custom maxTokens (e.g. 65536)
-  const dbProvider = await prisma.aIProvider.findFirst({
-    where: { 
-      OR: [
-        { name: aiProvider },
-        { type: aiProvider },
-        { id: aiProvider }
-      ],
-      isActive: true 
-    }
-  });
-  const dbConfig = dbProvider?.config as any;
-  // Use DB value if present, otherwise fallback to Agent YAML config
-  const effectiveMaxTokens = dbConfig?.maxTokens || config.model.max_tokens;
-  const effectiveTemperature = dbConfig?.temperature ?? config.model.temperature;
-  
-  console.log(`[Agent: ${agentName}] Using config: maxTokens=${effectiveMaxTokens}, temp=${effectiveTemperature}`);
-  // === FIX END ===
 
   const execution = await prisma.agentExecution.create({
     data: {
@@ -663,7 +648,7 @@ async function executeSpecialistAgent(
       }
 
       // If context exceeds 90k tokens, summarize agent findings
-      const CONTEXT_THRESHOLD = 90000;
+      const CONTEXT_THRESHOLD = 110000;
       if (contextTokens > CONTEXT_THRESHOLD) {
         console.log(`[Agent: ${agentName}] ⚠️  Context size (${contextTokens.toLocaleString()} tokens) exceeds threshold (${CONTEXT_THRESHOLD.toLocaleString()})`);
         console.log(`[Agent: ${agentName}] Summarizing context to prevent token limit issues...`);
@@ -757,8 +742,8 @@ async function executeSpecialistAgent(
             },
           },
           {
-            temperature: effectiveTemperature, // FIX: Use effective DB config
-            maxTokens: effectiveMaxTokens,     // FIX: Use effective DB config
+            temperature: config.model.temperature,
+            maxTokens: config.model.max_tokens,
             maxRetries: 2, // Allow up to 2 retries with summarization
           }
         );
@@ -778,7 +763,7 @@ async function executeSpecialistAgent(
           error: error.message,
           analysis: {
             status: 'incomplete',
-            reason: 'Context too large for LLM even after summarization',
+            reason: 'Context too large for LLM even even after summarization',
             partial_findings: agentFindings.slice(-3), // Last 3 findings
           },
         });
@@ -877,7 +862,7 @@ async function executeSpecialistAgent(
           data: {
             iteration: agentIteration,
             query: searchQuery,
-            timeRange: { earliest: '-120d', latest: 'now' },
+            timeRange: { earliest: '-24m', latest: 'now' },
           },
           timestamp: new Date(),
         });
@@ -886,7 +871,7 @@ async function executeSpecialistAgent(
         console.log(`[Agent: ${agentName}] Time range: -24h to now`);
         try {
           const queryResults = await splunkClient.oneshot(searchQuery, {
-            earliestTime: '-120d',
+            earliestTime: '-24m',
             latestTime: 'now',
             maxResults: 100,
           });
@@ -901,8 +886,8 @@ async function executeSpecialistAgent(
           const resultsTokenCount = estimateTokenCount(JSON.stringify(results));
           console.log(`[Agent: ${agentName}] Results token count: ${resultsTokenCount.toLocaleString()} tokens`);
 
-          // If results are too large (>50k tokens), prompt agent to refine query
-          const RESULTS_TOKEN_THRESHOLD = 50000;
+          // If results are too large (>90k tokens), prompt agent to refine query
+          const RESULTS_TOKEN_THRESHOLD = 90000;
           if (resultsTokenCount > RESULTS_TOKEN_THRESHOLD) {
             console.log(`[Agent: ${agentName}] ⚠️  Query results too large (${resultsTokenCount.toLocaleString()} tokens > ${RESULTS_TOKEN_THRESHOLD.toLocaleString()} threshold)`);
 
@@ -920,12 +905,7 @@ async function executeSpecialistAgent(
               timestamp: new Date(),
             });
 
-            // =========================================================================
-            // FIX: PARROTING ISSUE
-            // Replace the huge instruction string inside the data array with a 
-            // generic system note, preventing the agent from trying to copy the text.
-            // The actual instructions are now injected at the bottom of buildAgentPrompt
-            // =========================================================================
+            // Store a truncated version with guidance to refine
             agentFindings.push({
               iteration: agentIteration,
               action: 'query',
@@ -939,7 +919,19 @@ async function executeSpecialistAgent(
               },
               reasoning: agentDecision.reasoning,
               refinement_needed: true,
-              system_directive: "Results too large. Agent MUST write a new, refined query."
+              refinement_guidance: `Your query returned too much data (${resultsTokenCount.toLocaleString()} tokens). Please refine your query by:
+1. Adding more specific filters (e.g., specific eventName, sourceIPAddress, or userName)
+2. Reducing the time range (e.g., use earliest=-1h instead of -24h)
+3. Using aggregation commands (| stats, | rare, | top) instead of returning raw events
+4. Adding | head N to limit results to a specific number
+5. Using more precise field filters to target specific events
+
+Example refinements:
+- Instead of: index=cloudtrail earliest=-24h
+- Try: index=cloudtrail eventName=CreateAccessKey earliest=-1h | head 20
+- Or: index=cloudtrail userIdentity.userName=suspi cious-user earliest=-6h
+
+The sample of 10 results is shown below for reference.`
             });
 
             console.log(`[Agent: ${agentName}] Results truncated to 10 sample entries. Agent will be prompted to refine query.`);
@@ -1046,6 +1038,7 @@ async function executeSpecialistAgent(
           confidence: agentDecision.confidence,
         });
 
+        // Emit output event
         // Emit output event
         emitAgentEvent({
           investigationId: state.investigation_id,
@@ -1319,7 +1312,7 @@ CRITICAL INSTRUCTIONS:
   console.log(`[Orchestrator] Current context size: ${contextTokens.toLocaleString()} tokens`);
 
   // If context exceeds threshold, we're in a critical state
-  const CRITICAL_THRESHOLD = 100000;
+  const CRITICAL_THRESHOLD = 200000;
   if (contextTokens > CRITICAL_THRESHOLD) {
     console.log(`[Orchestrator] ⚠️  Context size exceeds critical threshold (${CRITICAL_THRESHOLD.toLocaleString()} tokens)`);
     console.log(`[Orchestrator] Forcing investigation completion to prevent token overflow`);
@@ -1337,13 +1330,25 @@ CRITICAL INSTRUCTIONS:
     return;
   }
 
-  const reflectionPrompt = `
+const findingsArray = Array.isArray(state.findings) 
+  ? state.findings 
+  : Object.values(state.findings);
+
+const summarizedFindings = findingsArray.map((f: any) => ({
+  agent: f.agent,                    // was f.agentName
+  iterations: f.iterations,
+  total_queries: f.total_queries,
+  key_findings: f.key_findings || [],  // top level, no f.result wrapper
+  summary: f.key_findings || 'No summary available',
+}));
+
+const reflectionPrompt = `
 You are the Orchestrator reviewing investigation progress.${whitelistSection}${userGuidanceSection}
 
 COMPLETED AGENTS: ${state.completed_agents.join(', ')}
 
 FINDINGS SO FAR:
-${JSON.stringify(state.findings, null, 2)}
+${JSON.stringify(summarizedFindings, null, 2)}
 
 REMAINING STEPS: ${state.next_steps.join(', ') || 'None'}
 
@@ -1405,8 +1410,9 @@ async function buildAgentPrompt(config: AgentConfig, state: AgenticState, findin
     ? `\n\n=== WHITELISTED IOCs (KNOWN SAFE - MUST EXCLUDE) ===\n\n${whitelistJSON}\n\nCRITICAL INSTRUCTION: The above IOCs are verified safe entities that MUST be completely excluded from your security analysis:\n- DO NOT investigate these users, IPs, domains, files, or hashes\n- DO NOT include them in your findings, analysis, or reports  \n- DO NOT flag them as suspicious or mention them as threats\n- These entities have been pre-approved and filtered for your safety\n- If you see activity from these IOCs, treat it as normal/benign baseline activity\n\nThese IOCs have already been filtered from your Splunk results, but if you encounter them in correlation analysis or pattern matching, you MUST skip them.\n`
     : '';
 
-  const splunkReference = `\n\n=== SPLUNK INDEXES & SOURCETYPES AVAILABLE ===\n\nIndexes:\n- cloudtrail: AWS API activity, security auditing\n- vpcflow: Network traffic analysis, flow logs\n- linux: Linux security, Sysmon, auth logs\n- windows: Windows events, security logs\n- cloudwatch: ECS logs, Lambda, Bedrock AI\n- aws-metadata: EC2 metadata, resource inventory\n- loadbalancer: ELB access logs, web traffic\n- waf: AWS WAF logs\n- amazonq: Amazon Q invocation logs\n\nKey Source Types:\n- aws:cloudtrail (cloudtrail index): IAM activity, API calls\n- aws:cloudwatchlogs:vpcflow (vpcflow index): Network traffic\n- aws:cloudwatchlogs:ecs (cloudwatch index): Container logs\n- sysmon:linux (linux index): Process creation, network connections\n- linux_auth (linux index): SSH logins, sudo commands\n- XmlWinEventLog (windows index): Windows security events\n\nIMPORTANT FIELD EXTRACTION NOTES:\n- Most sourcetypes have PRE-EXTRACTED FIELDS that are immediately available\n- Use the DISCOVERED INDEX STRUCTURE section below for exact field names per sourcetype\n\nExample Queries (ALWAYS include earliest= and latest=):\n- index=cloudtrail eventName=ConsoleLogin earliest=-120d latest=now | table _time, userIdentity.userName, sourceIPAddress\n- index=vpcflow action=REJECT earliest=-120d latest=now | stats count by srcaddr, dstport\n- index=linux sourcetype=sysmon:linux EventID=1 earliest=-120d latest=now | table _time, Image, CommandLine\n- index=windows EventCode=4625 earliest=-120d latest=now | stats count by Account_Name\n\nCRITICAL SPLUNK TIME FORMAT RULES:\n1. ALWAYS use earliest= and latest= in ALL queries\n2. Relative time (PREFERRED): earliest=-24h, earliest=-120d, earliest=-30m, latest=now\n3. Snap to time: earliest=-24h@h (snap to hour), earliest=-d@d (snap to day start)\n4. Absolute time format: earliest="11/01/2025:00:00:00" latest="11/30/2025:23:59:59"\n    - Format MUST be: MM/DD/YYYY:HH:MM:SS (American format with colons)\n5. Epoch time: earliest=1698796800 latest=1701388799\n6. NEVER use ISO 8601 format (2025-11-01T00:00:00) - THIS IS INVALID\n\nExamples:\n- Last 24 hours: earliest=-24h latest=now\n- Last 120 days: earliest=-120d latest=now\n- Yesterday: earliest=-d@d latest=@d\n- Specific dates: earliest="11/01/2025:00:00:00" latest="11/30/2025:23:59:59"\n- This month: earliest=-mon@mon latest=now\n`;
+  const splunkReference = `\n\n=== SPLUNK INDEXES & SOURCETYPES AVAILABLE ===\n\nIndexes:\n- cloudtrail: AWS API activity, security auditing\n- vpcflow: Network traffic analysis, flow logs\n- linux: Linux security, Sysmon, auth logs\n- windows: Windows events, security logs\n- cloudwatch: ECS logs, Lambda, Bedrock AI\n- aws-metadata: EC2 metadata, resource inventory\n- loadbalancer: ELB access logs, web traffic\n- waf: AWS WAF logs\n- amazonq: Amazon Q invocation logs\n\nKey Source Types:\n- aws:cloudtrail (cloudtrail index): IAM activity, API calls\n- aws:cloudwatchlogs:vpcflow (vpcflow index): Network traffic\n- aws:cloudwatchlogs:ecs (cloudwatch index): Container logs\n- sysmon:linux (linux index): Process creation, network connections\n- linux_auth (linux index): SSH logins, sudo commands\n- XmlWinEventLog (windows index): Windows security events\n\nIMPORTANT FIELD EXTRACTION NOTES:\n- Most sourcetypes have PRE-EXTRACTED FIELDS that are immediately available\n- Use the DISCOVERED INDEX STRUCTURE section below for exact field names per sourcetype\n\nExample Queries (ALWAYS include earliest= and latest=):\n- index=cloudtrail eventName=ConsoleLogin earliest=-24h latest=now | table _time, userIdentity.userName, sourceIPAddress\n- index=vpcflow action=REJECT earliest=-7d latest=now | stats count by srcaddr, dstport\n- index=linux sourcetype=sysmon:linux EventID=1 earliest=-1h latest=now | table _time, Image, CommandLine\n- index=windows EventCode=4625 earliest=-24h latest=now | stats count by Account_Name\n\nCRITICAL SPLUNK TIME FORMAT RULES:\n1. ALWAYS use earliest= and latest= in ALL queries\n2. Relative time (PREFERRED): earliest=-24h, earliest=-7d, earliest=-30m, latest=now\n3. Snap to time: earliest=-24h@h (snap to hour), earliest=-d@d (snap to day start)\n4. Absolute time format: earliest="11/01/2025:00:00:00" latest="11/30/2025:23:59:59"\n   - Format MUST be: MM/DD/YYYY:HH:MM:SS (American format with colons)\n5. Epoch time: earliest=1698796800 latest=1701388799\n6. NEVER use ISO 8601 format (2025-11-01T00:00:00) - THIS IS INVALID\n\nExamples:\n- Last 24 hours: earliest=-24h latest=now\n- Last 7 days: earliest=-7d latest=now\n- Yesterday: earliest=-d@d latest=@d\n- Specific dates: earliest="11/01/2025:00:00:00" latest="11/30/2025:23:59:59"\n- This month: earliest=-mon@mon latest=now\n`;
 
+  // Fetch dynamic index structure from database (same as executor.ts)
   let discoveredStructure = '';
   try {
     const splunkConfig = await prisma.splunkConfig.findFirst({
@@ -1445,15 +1451,8 @@ async function buildAgentPrompt(config: AgentConfig, state: AgenticState, findin
     }
   } catch (error) {
     console.error('[Agentic Workflow] Error fetching index structure:', error);
+    // Continue without dynamic structure
   }
-
-  // =========================================================================
-  // FIX: PARROTING ISSUE 
-  // Determine if the last query triggered a need for refinement.
-  // We check this here so we can append the instructions OUTSIDE the JSON array.
-  // =========================================================================
-  const lastFinding = findings[findings.length - 1];
-  const needsRefinement = lastFinding && lastFinding.refinement_needed === true;
 
   return `
 You are an autonomous ${config.name} agent. Your job is to investigate this security alert thoroughly.
@@ -1540,18 +1539,7 @@ OUTPUT FORMAT (JSON):
   "complete": true if satisfied
 }
 
-${needsRefinement ? `
-🚨 SYSTEM CRITICAL DIRECTIVE 🚨
-Your last query returned TOO MUCH DATA. 
-You MUST output a NEW JSON object with action="query" and provide a MORE SPECIFIC query.
-Strategies to fix this:
-- Add specific filters (e.g. eventName="Login")
-- Reduce the time range (e.g. earliest=-1h)
-- Use aggregations (| stats count by ...)
-- Limit results (| head 50)
-
-DO NOT apologize or copy/paste these refinement instructions. ONLY output the requested JSON format.
-` : 'Be thorough. Query data as needed. Report when you have solid findings.'}
+Be thorough. Query data as needed. Report when you have solid findings.
 `;
 }
 

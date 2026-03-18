@@ -118,7 +118,6 @@ export async function PUT(
 }
 
 // DELETE /api/queries/[id] - Delete a query
-// DELETE /api/queries/[id] - Delete a query (or ALL queries)
 export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -126,14 +125,6 @@ export async function DELETE(
   try {
     const { id } = await params;
 
-    // === ADD THIS BLOCK TO INTERCEPT "DELETE ALL" ===
-    if (id === 'delete-all') {
-      await prisma.savedQuery.deleteMany({});
-      return NextResponse.json({ success: true, message: 'All queries deleted' });
-    }
-    // ================================================
-
-    // Normal single-deletion logic
     await prisma.savedQuery.delete({
       where: { id },
     });
@@ -154,46 +145,3 @@ export async function DELETE(
     );
   }
 }
-
-// PATCH /api/queries/[id] - Update a query (Partial Update)
-export async function PATCH(
-  request: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  try {
-    const { id } = await params;
-    const body = await request.json();
-
-    const updateData: any = {};
-
-    // Only update fields that are actually provided in the request body
-    if (body.name !== undefined) updateData.name = body.name;
-    if (body.description !== undefined) updateData.description = body.description;
-    if (body.splQuery !== undefined) updateData.splQuery = body.splQuery;
-    if (body.category !== undefined) updateData.category = body.category;
-    if (body.severity !== undefined) updateData.severity = body.severity;
-    if (body.mitreAttack !== undefined) updateData.mitreAttack = body.mitreAttack;
-
-    const query = await prisma.savedQuery.update({
-      where: { id },
-      data: updateData,
-    });
-
-    return NextResponse.json(query);
-  } catch (error: any) {
-    if (error.code === 'P2025') {
-      return NextResponse.json(
-        { error: 'Query not found' },
-        { status: 404 }
-      );
-    }
-
-    console.error('Error updating query:', error);
-    return NextResponse.json(
-      { error: 'Failed to update query' },
-      { status: 500 }
-    );
-  }
-}
-
-

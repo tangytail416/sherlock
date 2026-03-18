@@ -16,7 +16,9 @@ import {
   ShieldCheck,
   Target,
   BookOpen,
-  Warehouse
+  Warehouse,
+  Tags,
+  Bot,
 } from 'lucide-react';
 import { useTheme } from 'next-themes';
 import {
@@ -87,6 +89,16 @@ const settingsItems = [
     title: 'IOC Whitelist',
     href: '/settings/ioc-whitelist',
     icon: ShieldCheck,
+  },
+  {
+    title: 'Tags',
+    href: '/settings/tags',
+    icon: Tags,
+  },
+  {
+	title: 'Agents',
+	href:'/settings/agent_s',
+	icon: Bot,
   },
 ];
 

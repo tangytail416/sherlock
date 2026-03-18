@@ -20,7 +20,7 @@ model:
   provider: anthropic
   model_name: claude-sonnet-4-20250514
   temperature: 0.1
-  max_tokens: 65536
+  max_tokens: 8192
 
 capabilities:
   - cloudwatch_logs_analysis
@@ -69,21 +69,18 @@ splunk_queries:
         index=cloudwatch sourcetype=aws:cloudwatchlogs:ecs (ERROR OR Exception OR "Internal Server Error")
         | stats count by log_group, error_message
         | sort -count
-        | head 20
 
     - name: "Detect SQL injection attempts in application logs"
       spl: |
         index=cloudwatch ("UNION SELECT" OR "' OR '1'='1" OR "DROP TABLE" OR "xp_cmdshell")
         | table _time, log_group, message, src_ip
         | sort -_time
-        | head 20
 
     - name: "Find XSS attack attempts"
       spl: |
         index=cloudwatch ("<script>" OR "javascript:" OR "onerror=" OR "onload=")
         | table _time, log_group, message, src_ip
         | sort -_time
-        | head 20
 
     - name: "Detect authentication failures"
       spl: |
@@ -91,21 +88,18 @@ splunk_queries:
         | stats count by src_ip, user
         | where count > 10
         | sort -count
-        | head 20
 
     - name: "Find 5xx errors in ELB logs"
       spl: |
         index=loadbalancer sourcetype=aws:elb:accesslogs elb_status_code>=500
         | stats count by elb_status_code, target_status_code, request
         | sort -count
-        | head 20
 
     - name: "Detect API rate limit violations"
       spl: |
         index=cloudwatch ("rate limit" OR "429" OR "TooManyRequests")
         | stats count by src_ip, endpoint
         | sort -count
-        | head 20
 
     - name: "Find Bedrock AI prompt injection attempts"
       spl: |
@@ -113,7 +107,6 @@ splunk_queries:
         | search message="*ignore previous instructions*" OR message="*you are now*" OR message="*system prompt*"
         | table _time, user, message
         | sort -_time
-        | head 20
 
     - name: "Analyze Lambda function errors"
       spl: |
@@ -121,7 +114,6 @@ splunk_queries:
         | rex field=message "(?<error_type>Error|Exception|Timeout)"
         | stats count by function_name, error_type
         | sort -count
-        | head 20
 
     - name: "Detect unusual user agents (bot/scanner activity)"
       spl: |
@@ -129,14 +121,12 @@ splunk_queries:
         | where match(user_agent, "(?i)(bot|crawl|spider|scanner|sqlmap|nikto|burp)")
         | stats count by user_agent, client_ip
         | sort -count
-        | head 20
 
     - name: "Find path traversal attempts"
       spl: |
         index=cloudwatch ("../" OR "/etc/passwd" OR ".env" OR ".git")
         | table _time, log_group, request_path, src_ip
         | sort -_time
-        | head 20
 
   key_fields:
     - log_group
@@ -154,18 +144,6 @@ prompts:
     You are an AWS CloudWatch Logs Investigation Specialist. Your role is to analyze
     application and system logs stored in CloudWatch Log Groups to identify security
     incidents, application errors, anomalous behavior, and operational issues.
-
-    === SPLUNK QUERY DATA LIMITS (CRITICAL) ===
-    You have a strict token limit for processing query results. If you return too much data, the system will crash.
-    You MUST adhere to these rules when writing or modifying Splunk queries:
-    1. NEVER use `values()` or `list()` on high-volume logs like IPs, ports, user agents, or request paths. It creates massive arrays.
-    2. ALWAYS use `dc()` (distinct count) to see how many unique entities exist without printing them all.
-    3. If you need specific examples, use `top limit=10` or `stats count by X | head 10`.
-    4. ALWAYS append `| head 20` to any stats or table command to limit the rows returned. Do not output unbounded tables.
-
-    === CRITICAL TIME RANGE RULES ===
-    1. If the provided alert does NOT specify an exact timestamp, you MUST default to `earliest=-120d latest=now` for ALL your queries.
-    2. CloudWatch investigations require a wide historical baseline to uncover slow-moving threats or persistent errors. Do NOT use `-24h`, `-2h`, or `-7d` unless explicitly instructed to do so.
 
     === YOUR EXPERTISE ===
     You are an expert in:

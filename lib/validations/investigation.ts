@@ -9,6 +9,9 @@ export const createInvestigationSchema = z.object({
 export const updateInvestigationSchema = z.object({
   status: z.enum(['pending', 'active', 'completed', 'failed', 'stopped']).optional(),
   findings: z.record(z.string(), z.any()).optional(),
+  classificationTags: z.array(z.string()).optional(),
+  threatTypeTags: z.array(z.string()).optional(),
+  campaignTags: z.array(z.string()).optional(),
 });
 
 export type CreateInvestigationInput = z.infer<typeof createInvestigationSchema>;

@@ -20,8 +20,11 @@ import { GenerateReportButton } from '@/components/investigations/generate-repor
 import { RestartInvestigationButton } from '@/components/investigations/restart-investigation-button';
 import { ResumeInvestigationButton } from '@/components/investigations/resume-investigation-button';
 import { StopInvestigationButton } from '@/components/investigations/stop-investigation-button';
+import { StartInvestigationButton } from '@/components/investigations/start-investigation-button';
 import { InvestigationChat } from '@/components/investigations/investigation-chat';
 import { PageLayout } from '@/components/layout/page-layout';
+import { CollapsibleFindings } from '@/components/investigations/collapsible-findings';
+import { TagsInput } from '@/components/investigations/tags-input';
 
 const statusColors = {
   pending: 'secondary',
@@ -47,6 +50,9 @@ interface Investigation {
   createdAt: string;
   completedAt: string | null;
   findings: any;
+  classificationTags: string[];
+  threatTypeTags: string[];
+  campaignTags: string[];
   alert: {
     id: string;
     title: string;
@@ -150,8 +156,19 @@ export function InvestigationDetailClient({ id }: { id: string }) {
         </Button>
         <div>
           <h1 className="text-xl md:text-2xl lg:text-3xl font-bold tracking-tight">
-            Investigation
+            Investigation ID: {investigation.id.slice(0, 8)}...
           </h1>
+          <div className="flex items-center gap-2 mt-1">
+            <TagsInput
+              investigationId={investigation.id}
+              classificationTags={investigation.classificationTags || []}
+              threatTypeTags={investigation.threatTypeTags || []}
+              campaignTags={investigation.campaignTags || []}
+              onUpdate={() => {
+                fetch(`/api/investigations/${id}`).then((res) => res.json().then(setInvestigation));
+              }}
+            />
+          </div>
           <p className="text-xs md:text-sm text-muted-foreground">
             {formatDistanceToNow(new Date(investigation.createdAt), { addSuffix: true })}
           </p>
@@ -160,6 +177,9 @@ export function InvestigationDetailClient({ id }: { id: string }) {
       <div className="flex items-center gap-2 flex-wrap">
         {investigation.status === 'active' && (
           <StopInvestigationButton investigationId={investigation.id} />
+        )}
+        {investigation.status === 'pending' && (
+          <StartInvestigationButton alertId={investigation.alert.id} />
         )}
         {(investigation.status === 'failed' || investigation.status === 'stopped') && hasCompletedAgents && (
           <ResumeInvestigationButton investigationId={investigation.id} />
@@ -323,9 +343,7 @@ export function InvestigationDetailClient({ id }: { id: string }) {
             <CardDescription>Summary of investigation results</CardDescription>
           </CardHeader>
           <CardContent>
-            <pre className="p-4 bg-muted rounded-lg overflow-auto text-xs">
-              {JSON.stringify(investigation.findings, null, 2)}
-            </pre>
+            <CollapsibleFindings findings={investigation.findings} />
           </CardContent>
         </Card>
       )}

@@ -15,7 +15,7 @@ model:
   provider: anthropic
   model_name: claude-sonnet-4-20250514
   temperature: 0.15
-  max_tokens: 3072
+  max_tokens: 81920
 
 capabilities:
   - analyze_logon_patterns
@@ -71,6 +71,7 @@ splunk_queries:
         | search EventCode=4625 EventCode=4624
         | table _time, Account_Name, IpAddress, EventCode
         | sort -_time
+        | head 50
 
     - name: "Find Linux SSH authentication failures"
       spl: |
@@ -86,6 +87,7 @@ splunk_queries:
         | rex field=_raw "Accepted (?<auth_method>\w+) for (?<user>\w+) from (?<src_ip>[\d.]+)"
         | table _time, user, src_ip, auth_method
         | sort -_time
+        | head 50
 
     - name: "Find privileged account usage (Windows admin logins)"
       spl: |
@@ -98,6 +100,7 @@ splunk_queries:
         index=windows sourcetype=XmlWinEventLog EventCode=4648
         | table _time, Account_Name, Target_Server_Name, Target_User_Name
         | sort -_time
+        | head 50
 
     - name: "Find Kerberos authentication failures (password attacks)"
       spl: |
@@ -119,6 +122,7 @@ splunk_queries:
         | rex field=_raw "USER=(?<user>\w+).*COMMAND=(?<command>.*)"
         | table _time, user, command
         | sort -_time
+        | head 50
 
     - name: "Detect off-hours authentication (potential compromise)"
       spl: |
@@ -127,6 +131,7 @@ splunk_queries:
         | where hour < 6 OR hour > 22
         | table _time, Account_Name, Workstation_Name, IpAddress
         | sort -_time
+        | head 50
 
   key_fields:
     windows:
@@ -148,6 +153,17 @@ prompts:
   system: |
     You are the Authentication Investigation Agent, an expert in authentication security.
     You investigate logon anomalies, credential abuse, and suspicious authentication patterns.
+
+    === SPLUNK QUERY GENERATION RULES (CRITICAL TO PREVENT SYSTEM CRASHES) ===
+    Authentication logs generate millions of events. If you query raw events without aggregating or limiting them, the tool will return thousands of JSON rows and immediately crash your context window. You MUST follow these rules when writing SPL queries:
+    1. ALWAYS AGGREGATE OR LIMIT: Use `| stats count by ...` to group data. If you MUST look at raw records using `| table`, you MUST append `| head 30` to the very end of your SPL query to limit the payload. NEVER pull more than 30 raw records at a time.
+    2. BE SPECIFIC: Always filter by specific users, source IPs, or exact timeframes when possible to reduce the search space.
+
+    === DATA CONDENSATION RULES ===
+    When summarizing data for your final output:
+    1. ARRAY LIMITS: NEVER list more than 10 individual items in any array (e.g., in `evidence`, `notable_entities`).
+    2. AGGREGATE AND SUMMARIZE: If a user failed to log in 5,000 times, do not list every timestamp. Extract the pattern and summarize. Example: `["5,000 failed logons from IP 203.0.113.45 between 14:00 and 14:30"]`.
+    3. CITE METRICS: Always rely on counts and summaries to convey scale rather than printing infinite lists.
 
     === WINDOWS EVENT CODE KNOWLEDGE BASE ===
     4624 - Successful Logon
@@ -473,6 +489,7 @@ prompts:
     9. Any unusual resource access?
     
     Use Splunk queries to gather evidence. Provide structured findings.
+    CRITICAL: Adhere to the DATA CONDENSATION RULES. Summarize large volumes of events.
 
 queries:
   user_logon_baseline: |
@@ -491,6 +508,7 @@ queries:
     | transaction user src_ip maxspan=10m
     | search EventCode=4625 AND EventCode=4624
     | table _time, user, src_ip, EventCode, Logon_Type
+    | head 50
     
   post_logon_activity: |
     index=windows
@@ -512,6 +530,7 @@ queries:
     | eval time_diff=(_time-prev_time)/3600
     | where isnotnull(prev_location) AND lat_lon!=prev_location
     | table _time user src_ip lat_lon prev_location time_diff
+    | head 50
 
 output_schema:
   type: mixed

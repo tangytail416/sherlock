@@ -6,9 +6,7 @@
  */
 
 import crypto from 'crypto';
-import { PrismaClient } from '@prisma/client';
-
-const prisma = new PrismaClient();
+import { prisma } from '@/lib/db';
 
 /**
  * Interface for finding data used in hash generation

@@ -101,7 +101,13 @@ export async function generateInvestigationReport(
 
   // Query Neo4j for graph-based context (if enabled)
   const neo4jEnabled = includeGraphContext && process.env.NEO4J_ENABLED !== 'false';
-  let graphContext = {
+  let graphContext: {
+    entities: any[];
+    relationships: any[];
+    relatedFindings: any[];
+    entityCounts: Record<string, number>;
+    lateralMovement: any[];
+  } = {
     entities: [],
     relationships: [],
     relatedFindings: [],
@@ -167,6 +173,7 @@ Generate a comprehensive security investigation report. Return your response as 
   "sections": {
     "executive_summary": "HTML content - 3-5 paragraphs in plain language for executives. Use <p>, <strong>, <em> tags.",
     "threat_classification": "HTML content - MITRE ATT&CK mapping table. Use proper <table> with <thead> and <tbody>.",
+    "incident_severity": "The determined overall severity of the incident between CRITICAL, HIGH, MEDIUM, LOW, and FALSE_POSITIVE.",
     "key_findings": [
       "Finding 1 with confidence level",
       "Finding 2 with confidence level",
@@ -259,11 +266,12 @@ Return ONLY the JSON object, no additional text.
 
     reportData = {
       sections: {
-        executive_summary: `<p>${extractSection('Executive Summary', markdownContent).replace(/\n\n/g, '</p><p>')}</p>`,
+        executive_summary: `<p>${extractSection('Executive Summary 123', markdownContent).replace(/\n\n/g, '</p><p>')}</p>`,
         threat_classification: extractSection('MITRE ATT&CK Mapping', markdownContent) || 'Security incident under investigation',
+        incident_severity: extractSection('Overall determined severity', markdownContent) || ('Unchanged as ',investigation.alert.severity),
         key_findings: extractList('Key Findings', markdownContent),
         attack_timeline: [],
-        technical_summary: `<p>${extractSection('Technical Analysis', markdownContent).replace(/\n\n/g, '</p><p>')}</p>`,
+        technical_summary: `<p>${extractSection('Technical Analysis 456', markdownContent).replace(/\n\n/g, '</p><p>')}</p>`,
         indicators_of_compromise: extractList('Indicators of Compromise', markdownContent),
         impact_assessment: {},
         recommendations: [],
@@ -291,7 +299,7 @@ Return ONLY the JSON object, no additional text.
         sections: sections,
         severity: severity,
       },
-      summary: sections.executive_summary?.replace(/<[^>]*>/g, '').substring(0, 3000) || 'Report generated successfully',
+      summary: sections.executive_summary?.replace(/<[^>]*>/g, '').substring(0, 1500) || 'Report generated successfully',
       recommendations: JSON.stringify(sections.recommendations || []),
     },
   });

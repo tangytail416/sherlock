@@ -33,6 +33,7 @@ interface Report {
     sections?: {
       executive_summary?: string;
       threat_classification?: string;
+	  incident_severity?: string;
       key_findings?: string[];
       attack_timeline?: Array<{
         timestamp: string;
@@ -91,6 +92,7 @@ interface Report {
     };
     technical_summary?: string;
     threat_classification?: string;
+	incident_severity?: string;
     key_findings?: string[];
     indicators_of_compromise?: string[];
     attack_timeline?: Array<{
@@ -292,7 +294,24 @@ export default function ReportDetailPage() {
               </CardContent>
             </Card>
           )}
-
+		  {/*-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------*/}
+		{report.findings?.sections.incident_severity&&(
+		<Card>
+			<CardHeader>
+				<CardTitle className="flex items-center-gap-2">
+					<AlertTriangle className="h-5 w-5" />
+					Incident severity
+				</CardTitle>
+			</CardHeader>
+		     <CardContent>
+                <div 
+                  className="prose prose-sm max-w-none dark:prose-invert overflow-x-auto"
+                  dangerouslySetInnerHTML={{ __html: report.findings.sections.incident_severity }}
+                />
+              </CardContent>
+			 </Card>
+		)}
+		{/*//-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------*/}
           {/* Key Findings - HTML */}
           {report.findings.sections.key_findings && report.findings.sections.key_findings.length > 0 && (
             <Card>

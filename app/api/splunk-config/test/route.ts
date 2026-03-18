@@ -15,7 +15,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    if (!apiToken && !username) {
+    if (!apiToken && (!username || !password)) {
       return NextResponse.json(
         { error: 'Either API token or username/password is required' },
         { status: 400 }

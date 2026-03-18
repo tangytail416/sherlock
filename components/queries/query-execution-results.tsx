@@ -10,7 +10,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
-import { ScrollArea } from '@/components/ui/scroll-area';
+import { ScrollArea, ScrollBar } from '@/components/ui/scroll-area';
 
 interface QueryExecutionResultsProps {
   results: any[];
@@ -105,6 +105,7 @@ export function QueryExecutionResults({
               </TableBody>
             </Table>
           </div>
+          <ScrollBar orientation='horizontal' />
         </ScrollArea>
       </CardContent>
     </Card>

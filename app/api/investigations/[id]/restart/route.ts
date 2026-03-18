@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { executeAgenticWorkflow } from '@/lib/agents/agentic-workflow';
+import { getAIProviderFromDB } from '@/lib/ai';
 
 // POST /api/investigations/[id]/restart - Restart a failed investigation
 export async function POST(
@@ -55,8 +56,15 @@ export async function POST(
       },
     });
 
+    // Get AI provider - use saved one, or fallback to DB default, then to glm
+    let aiProvider = investigation.aiProvider;
+    if (!aiProvider) {
+      const dbProvider = await getAIProviderFromDB();
+      aiProvider = dbProvider?.type || 'glm';
+    }
+
     // Trigger agent execution in the background
-    restartInvestigation(id, investigation.alert, investigation.aiProvider || 'openrouter').catch((error) => {
+    restartInvestigation(id, investigation.alert, aiProvider).catch((error) => {
       console.error('Error restarting investigation:', error);
     });
 

@@ -105,3 +105,27 @@ export async function POST(request: NextRequest) {
     );
   }
 }
+
+// DELETE /api/queries - Delete all queries
+export async function DELETE(request: NextRequest) {
+  try {
+    const searchParams = request.nextUrl.searchParams;
+    const deleteAll = searchParams.get('deleteAll');
+
+    if (deleteAll === 'true') {
+      await prisma.savedQuery.deleteMany({});
+      return NextResponse.json({ success: true, message: 'All queries deleted' });
+    }
+
+    return NextResponse.json(
+      { error: 'Invalid delete action' },
+      { status: 400 }
+    );
+  } catch (error) {
+    console.error('Error deleting queries:', error);
+    return NextResponse.json(
+      { error: 'Failed to delete queries' },
+      { status: 500 }
+    );
+  }
+}

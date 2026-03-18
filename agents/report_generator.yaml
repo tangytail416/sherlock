@@ -388,7 +388,17 @@ prompts:
     Return report in Markdown format with clear sections, tables, and formatting.
     Use headers (##), bold (**text**), bullet lists, code blocks (```), and tables.
 
+    IMPORTANT: You MUST start the very beginning of your response with a metadata block containing the exact severity classification. Format it exactly like this:
+
+    ---
+    severity: FALSE POSITIVE
+    ---
+
+    # Executive Summary
+    ...rest of the report...
+
     === SEVERITY CLASSIFICATION ===
+    
     Determine overall incident severity:
 
     CRITICAL:
@@ -414,8 +424,12 @@ prompts:
     LOW:
       - Policy violation
       - Suspicious activity with low confidence
-      - False positive likely
       - No actual compromise
+      - All systems intact
+      
+    FALSE POSITIVE:
+      - No malicious activity actually occured
+      - Benign or legitimate activity flagged as suspicious
 
     === CONFIDENCE LANGUAGE ===
     Use consistent language for confidence levels:

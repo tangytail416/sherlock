@@ -232,9 +232,9 @@ export async function createAIClient(providerType: string, customConfig?: Partia
     }
   }
 
-  if (!config.apiKey) {
+  /*if (!config.apiKey) {
     throw new Error(`API key not found for provider: ${providerType}. Please configure the provider in settings.`);
-  }
+  }*/
 
   return new UnifiedAIClient(config);
 }

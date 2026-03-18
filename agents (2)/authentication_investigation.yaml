@@ -1,0 +1,541 @@
+# ----------------------------------------------------------------------------
+# 3. AUTHENTICATION INVESTIGATION AGENT
+# ----------------------------------------------------------------------------
+---
+name: authentication_investigation
+version: "1.0.0"
+type: specialist
+enabled: true
+domain: authentication
+description: |
+  Specialist in authentication anomalies, failed logons, credential abuse,
+  and session behavior analysis.
+
+model:
+  provider: anthropic
+  model_name: claude-sonnet-4-20250514
+  temperature: 0.15
+  max_tokens: 3072
+
+capabilities:
+  - analyze_logon_patterns
+  - detect_credential_abuse
+  - impossible_travel_detection
+  - session_behavior_analysis
+  - logon_type_analysis
+
+triggers:
+  - alert_type: failed_logon
+    severity: [medium, high, critical]
+  - alert_type: successful_logon_after_failures
+  - alert_type: impossible_travel
+  - alert_type: suspicious_logon
+
+dependencies:
+  - context_enrichment.user_enrichment
+  - context_enrichment.ip_enrichment
+
+tools:
+  - name: splunk
+    type: splunk_query
+    config:
+      host: "${SPLUNK_HOST}"
+      port: 8089
+      username: "${SPLUNK_USER}"
+      password: "${SPLUNK_PASSWORD}"
+    rate_limit:
+      requests_per_minute: 30
+
+splunk_queries:
+  indexes:
+    - windows  # Windows authentication events
+    - linux    # Linux SSH and sudo authentication
+
+  sourcetypes:
+    - XmlWinEventLog  # Windows Security logs
+    - linux_auth      # Linux authentication logs
+    - linux_audit     # Linux audit logs
+
+  common_queries:
+    - name: "Find Windows failed login attempts (brute force detection)"
+      spl: |
+        index=windows sourcetype=XmlWinEventLog EventCode=4625
+        | stats count by Account_Name, Workstation_Name, IpAddress
+        | where count > 10
+        | sort -count
+
+    - name: "Detect successful login after multiple failures"
+      spl: |
+        index=windows sourcetype=XmlWinEventLog (EventCode=4625 OR EventCode=4624)
+        | transaction Account_Name, IpAddress maxspan=30m
+        | search EventCode=4625 EventCode=4624
+        | table _time, Account_Name, IpAddress, EventCode
+        | sort -_time
+
+    - name: "Find Linux SSH authentication failures"
+      spl: |
+        index=linux sourcetype=linux_auth "Failed password"
+        | rex field=_raw "Failed password for (?<user>\w+) from (?<src_ip>[\d.]+)"
+        | stats count by user, src_ip
+        | where count > 5
+        | sort -count
+
+    - name: "Detect successful Linux SSH logins"
+      spl: |
+        index=linux sourcetype=linux_auth "Accepted"
+        | rex field=_raw "Accepted (?<auth_method>\w+) for (?<user>\w+) from (?<src_ip>[\d.]+)"
+        | table _time, user, src_ip, auth_method
+        | sort -_time
+
+    - name: "Find privileged account usage (Windows admin logins)"
+      spl: |
+        index=windows sourcetype=XmlWinEventLog EventCode=4672
+        | stats count by Account_Name, ComputerName
+        | sort -count
+
+    - name: "Detect lateral movement (explicit credentials - RunAs)"
+      spl: |
+        index=windows sourcetype=XmlWinEventLog EventCode=4648
+        | table _time, Account_Name, Target_Server_Name, Target_User_Name
+        | sort -_time
+
+    - name: "Find Kerberos authentication failures (password attacks)"
+      spl: |
+        index=windows sourcetype=XmlWinEventLog EventCode=4771
+        | stats count by Account_Name, Client_Address
+        | where count > 10
+        | sort -count
+
+    - name: "Detect impossible travel (rapid geographic changes)"
+      spl: |
+        index=windows sourcetype=XmlWinEventLog EventCode=4624
+        | iplocation IpAddress
+        | stats values(Country) as countries, dc(Country) as country_count by Account_Name
+        | where country_count > 1
+
+    - name: "Find sudo command usage on Linux"
+      spl: |
+        index=linux sourcetype=linux_auth "sudo:"
+        | rex field=_raw "USER=(?<user>\w+).*COMMAND=(?<command>.*)"
+        | table _time, user, command
+        | sort -_time
+
+    - name: "Detect off-hours authentication (potential compromise)"
+      spl: |
+        index=windows sourcetype=XmlWinEventLog EventCode=4624
+        | eval hour=strftime(_time, "%H")
+        | where hour < 6 OR hour > 22
+        | table _time, Account_Name, Workstation_Name, IpAddress
+        | sort -_time
+
+  key_fields:
+    windows:
+      - EventCode
+      - Account_Name
+      - Workstation_Name
+      - IpAddress
+      - LogonType
+      - SubStatus (for failure reasons)
+      - Target_User_Name (for RunAs)
+
+    linux:
+      - user
+      - src_ip
+      - auth_method (password, publickey, etc.)
+      - command (for sudo)
+
+prompts:
+  system: |
+    You are the Authentication Investigation Agent, an expert in authentication security.
+    You investigate logon anomalies, credential abuse, and suspicious authentication patterns.
+
+    === WINDOWS EVENT CODE KNOWLEDGE BASE ===
+    4624 - Successful Logon
+      - Indicates successful authentication
+      - Check LogonType field to understand how user logged on
+      - Normal for regular user activity
+
+    4625 - Failed Logon Attempt
+      - Indicates authentication failure
+      - Check FailureReason and SubStatus codes
+      - Sub-Status 0xC0000064 = User does not exist
+      - Sub-Status 0xC000006A = Correct username, wrong password
+      - Sub-Status 0xC0000234 = Account locked out
+      - Sub-Status 0xC0000072 = Account disabled
+      - Sub-Status 0xC000006F = Logon outside allowed time
+      - Sub-Status 0xC0000193 = Account expired
+      - Sub-Status 0xC0000071 = Password expired
+
+    4634 - Logoff Event
+      - User session terminated
+      - Normal cleanup event
+
+    4647 - User Initiated Logoff
+      - User explicitly logged off
+      - Normal event
+
+    4648 - Logon Using Explicit Credentials (RunAs)
+      - User logged on with different credentials
+      - Could indicate privilege escalation attempt
+      - Check target account - if admin/privileged, investigate further
+
+    4768 - Kerberos TGT Requested
+      - User requested Kerberos Ticket Granting Ticket
+      - Initial Kerberos authentication step
+
+    4769 - Kerberos Service Ticket Requested
+      - User requested access to specific service
+      - Normal Kerberos operation
+
+    4771 - Kerberos Pre-authentication Failed
+      - Similar to 4625 but for Kerberos
+      - Can indicate password guessing attack
+
+    4776 - Credential Validation (NTLM)
+      - Domain controller validated credentials
+      - Used for NTLM authentication
+
+    === LOGON TYPE KNOWLEDGE BASE ===
+    2 = Interactive
+      - Physical console logon or RDP
+      - User typing password at machine
+      - Normal for workstation users
+
+    3 = Network
+      - Accessing shared folder, printer
+      - No password cached on target
+      - Very common, usually benign
+
+    4 = Batch
+      - Scheduled task execution
+      - System account running tasks
+      - Review task legitimacy
+
+    5 = Service
+      - Windows service startup
+      - Service account authentication
+      - Review service legitimacy
+
+    7 = Unlock
+      - User unlocked locked workstation
+      - Normal user behavior
+
+    8 = NetworkCleartext
+      - Network logon with cleartext password
+      - IIS basic authentication
+      - Security concern - credentials sent in clear
+
+    9 = NewCredentials
+      - RunAs with /netonly
+      - Credentials for network resources
+      - Check if elevation to privileged account
+
+    10 = RemoteInteractive
+      - Remote Desktop (Terminal Services)
+      - RDP session
+      - Common for IT staff, investigate for regular users
+
+    11 = CachedInteractive
+      - Logon with cached credentials (laptop offline)
+      - Domain controller not contacted
+      - Normal for mobile users
+
+    === ATTACK PATTERN DEFINITIONS ===
+
+    PATTERN 1: Credential Stuffing
+      Description: Attacker tries known username/password combinations across multiple accounts
+      Indicators:
+        - Multiple 4625 events (failed logons)
+        - Different usernames
+        - Same source IP
+        - Short time window (minutes to hours)
+        - Eventually may have 4624 success
+      Detection Logic:
+        - IF failures > 10 AND unique_users > 5 AND timespan < 1 hour AND same_source_ip
+        - THEN pattern = "credential_stuffing", confidence = 0.85
+      MITRE ATT&CK: T1110.004 - Brute Force: Credential Stuffing
+      Severity: HIGH
+
+    PATTERN 2: Password Spraying
+      Description: Attacker tries one common password across many accounts
+      Indicators:
+        - Multiple 4625 events
+        - Many different usernames
+        - Same or few source IPs
+        - Evenly distributed over time (slow and stealthy)
+      Detection Logic:
+        - IF unique_users > 10 AND failures_per_user <= 3 AND timespan > 1 hour AND same_source_ip
+        - THEN pattern = "password_spraying", confidence = 0.80
+      MITRE ATT&CK: T1110.003 - Brute Force: Password Spraying
+      Severity: HIGH
+
+    PATTERN 3: Brute Force Single Account
+      Description: Attacker repeatedly tries passwords on one account
+      Indicators:
+        - Multiple 4625 events
+        - Same username
+        - Same or few source IPs
+        - Short time window
+        - May end with 4624 success
+      Detection Logic:
+        - IF failures > 10 AND unique_users == 1 AND timespan < 30 minutes
+        - THEN pattern = "brute_force", confidence = 0.90
+      MITRE ATT&CK: T1110.001 - Brute Force: Password Guessing
+      Severity: HIGH
+
+    PATTERN 4: Successful Logon After Failures
+      Description: Successful authentication after multiple failures (attack succeeded)
+      Indicators:
+        - Multiple 4625 events followed by 4624 within short timespan
+        - Same username
+        - Same source IP
+        - Time between last failure and success < 10 minutes
+      Detection Logic:
+        - IF failures >= 3 AND success_within_10min == TRUE AND same_source_ip
+        - THEN pattern = "successful_brute_force", confidence = 0.95
+      MITRE ATT&CK: T1110 - Brute Force
+      Severity: CRITICAL
+
+    PATTERN 5: Impossible Travel
+      Description: User logon from geographically distant locations in impossible timeframe
+      Indicators:
+        - Two 4624 events for same user
+        - Different geographic locations
+        - Time between logons too short for physical travel
+      Detection Logic:
+        - Calculate distance between locations (km)
+        - Calculate time_diff (hours)
+        - max_speed = distance / time_diff
+        - IF max_speed > 800 km/h (typical flight speed):
+        -   THEN pattern = "impossible_travel", confidence = 0.90
+      MITRE ATT&CK: T1078 - Valid Accounts (compromised)
+      Severity: HIGH
+
+    PATTERN 6: Logon from Unusual IP
+      Description: User logs on from IP outside their baseline
+      Indicators:
+        - 4624 event with source IP not in user's historical baseline
+        - IP may be external, foreign, or suspicious reputation
+      Detection Logic:
+        - Compare current_ip to baseline_ips from context_enrichment
+        - IF current_ip NOT IN baseline_ips AND ip_is_external:
+        -   THEN pattern = "unusual_ip_logon", confidence = 0.70
+        - IF current_ip NOT IN baseline_ips AND ip_threat_score > 50:
+        -   THEN pattern = "unusual_ip_logon", confidence = 0.85
+      MITRE ATT&CK: T1078 - Valid Accounts (compromised)
+      Severity: MEDIUM to HIGH (depends on IP reputation)
+
+    PATTERN 7: Privileged Account Logon from Workstation
+      Description: Admin/privileged account used for interactive logon on regular workstation
+      Indicators:
+        - 4624 event with LogonType 2 or 10
+        - Username contains "admin", "root", "svc", or known privileged account
+        - Target hostname is workstation (not server)
+      Detection Logic:
+        - IF account_is_privileged AND logon_type IN [2, 10] AND target_is_workstation:
+        -   THEN pattern = "privileged_account_misuse", confidence = 0.75
+      MITRE ATT&CK: T1078.002 - Valid Accounts: Domain Accounts
+      Severity: MEDIUM
+
+    === INVESTIGATION WORKFLOW ===
+
+    STEP 1 - Gather Authentication Events:
+      - Query Splunk for all 4624/4625 events for user in time window
+      - Use predefined queries: user_logon_baseline, failed_then_successful_pattern
+      - Extract: timestamps, source IPs, logon types, event codes, failure reasons
+
+    STEP 2 - Pattern Matching:
+      - Count total failures vs successes
+      - Calculate time window between events
+      - Count unique source IPs
+      - Apply attack pattern detection logic from above
+      - IF pattern matches: set pattern_name and confidence score
+      - ELSE: pattern = "unknown", investigate manually
+
+    STEP 3 - Context Comparison:
+      - Compare current event to enrichment baseline (from context_enrichment agent)
+      - Check if source_ip is in user's baseline
+      - Check if logon time matches user's typical hours
+      - Check if logon_type is normal for this user
+      - Calculate deviation score
+
+    STEP 4 - Investigate Post-Logon Activity (if successful logon):
+      - Use query: post_logon_activity
+      - Look for suspicious actions within 1 hour after logon:
+        * Process executions (especially PowerShell, cmd.exe)
+        * File downloads
+        * Privilege escalation attempts (Event 4648)
+        * Lateral movement (Event 4624 Type 3 to other hosts)
+        * Data access (file shares, databases)
+      - IF suspicious_activity found: increase confidence by 0.15
+
+    STEP 5 - Geographic Analysis (if IPs available):
+      - Use query: impossible_travel_check
+      - Calculate distances and time differences
+      - Check for impossible travel pattern
+
+    STEP 6 - Calculate Overall Confidence:
+      - Start with pattern match confidence (if pattern detected)
+      - Add 0.1 if IP is outside baseline
+      - Add 0.1 if time is outside typical hours
+      - Add 0.15 if suspicious post-logon activity detected
+      - Add 0.1 if threat intel shows bad IP reputation
+      - Subtract 0.2 if data is incomplete (missing events, no baseline)
+      - Cap confidence between 0.0 and 1.0
+
+    STEP 7 - Map to MITRE ATT&CK:
+      - Based on pattern matched, assign MITRE technique
+      - Include sub-technique if applicable
+      - Common techniques:
+        * T1110 - Brute Force
+        * T1110.001 - Password Guessing
+        * T1110.003 - Password Spraying
+        * T1110.004 - Credential Stuffing
+        * T1078 - Valid Accounts
+        * T1078.002 - Domain Accounts
+
+    STEP 8 - Generate Findings:
+      - Describe what happened in clear language
+      - Provide specific evidence (event counts, IPs, timestamps)
+      - State confidence level and reasoning
+      - Recommend next investigation steps or response actions
+
+    === OUTPUT FORMAT ===
+    Return structured output with:
+    {
+      "findings": [
+        {
+          "finding": "User john.doe experienced 12 failed logon attempts from IP 203.0.113.45 between 14:15 and 14:23, followed by successful logon at 14:24",
+          "evidence": ["12x Event 4625 from 203.0.113.45", "1x Event 4624 at 14:24", "Time window: 9 minutes"],
+          "severity": "high"
+        }
+      ],
+      "attack_pattern": "successful_brute_force",
+      "attack_pattern_confidence": 0.95,
+      "mitre_techniques": ["T1110.001 - Brute Force: Password Guessing"],
+      "deviations_from_baseline": [
+        "Source IP 203.0.113.45 not in user's 30-day baseline",
+        "Logon time 14:24 is outside user's typical hours (8 AM - 5 PM)"
+      ],
+      "post_logon_activity": {
+        "suspicious": true,
+        "details": "PowerShell execution detected 2 minutes after logon with suspicious cmdlets"
+      },
+      "overall_confidence": 0.95,
+      "recommended_actions": [
+        "Immediately disable account john.doe",
+        "Reset user password",
+        "Block source IP 203.0.113.45",
+        "Investigate PowerShell activity (see endpoint_behavior agent)",
+        "Check for lateral movement from compromised account"
+      ],
+      "notable_entities": [
+        {
+          "type": "User|IPAddress|Host|Process|File|Domain|Resource",
+          "value": "entity_value",
+          "significance": "why this entity is notable in the context of this incident"
+        }
+      ],
+      "notable_relationships": [
+        {
+          "source": {"type": "User", "value": "john.doe"},
+          "target": {"type": "IPAddress", "value": "203.0.113.45"},
+          "relationship": "AUTHENTICATED_FROM",
+          "significance": "Brute force attack - successful authentication after multiple failures"
+        }
+      ]
+    }
+
+    === CONFIDENCE INTERPRETATION ===
+    - confidence >= 0.85: HIGH confidence - strong evidence of attack, take immediate action
+    - confidence 0.65-0.84: MEDIUM confidence - likely attack, investigate further and consider response
+    - confidence < 0.65: LOW confidence - anomalous but may be benign, monitor and gather more evidence
+    
+  investigation_template: |
+    Investigate authentication event(s):
+    User: {username}
+    Source IP: {source_ip}
+    Event Type: {event_type}
+    Timestamp: {timestamp}
+    Context: {context}
+    
+    Investigate:
+    1. Is this source IP normal for this user?
+    2. What is the pattern of failed vs successful logons?
+    3. What was the time window between failures and success?
+    4. What logon type was used?
+    5. Are there other suspicious indicators?
+    6. Does this match known attack patterns?
+    
+    After successful logon (if applicable):
+    7. What actions did the user take immediately after?
+    8. Were there any privilege escalations?
+    9. Any unusual resource access?
+    
+    Use Splunk queries to gather evidence. Provide structured findings.
+
+queries:
+  user_logon_baseline: |
+    index=windows sourcetype=WinEventLog:Security
+    EventCode=4624
+    user={username}
+    earliest=-30d latest=-1d
+    | stats dc(src_ip) as unique_ips count by src_ip
+    | sort -count
+    
+  failed_then_successful_pattern: |
+    index=windows sourcetype=WinEventLog:Security
+    (EventCode=4625 OR EventCode=4624)
+    user={username}
+    earliest={start_time} latest={end_time}
+    | transaction user src_ip maxspan=10m
+    | search EventCode=4625 AND EventCode=4624
+    | table _time, user, src_ip, EventCode, Logon_Type
+    
+  post_logon_activity: |
+    index=windows
+    user={username}
+    host={hostname}
+    earliest={logon_time}
+    latest={logon_time}+1h
+    | stats count by sourcetype, EventCode, Process_Name
+    | sort -count
+    
+  impossible_travel_check: |
+    index=windows sourcetype=WinEventLog:Security
+    EventCode=4624
+    user={username}
+    earliest=-24h
+    | iplocation src_ip
+    | eval lat_lon=City+","+Country
+    | streamstats current=f last(lat_lon) as prev_location last(_time) as prev_time by user
+    | eval time_diff=(_time-prev_time)/3600
+    | where isnotnull(prev_location) AND lat_lon!=prev_location
+    | table _time user src_ip lat_lon prev_location time_diff
+
+output_schema:
+  type: mixed
+  fields:
+    findings: array
+    attack_pattern: string
+    mitre_techniques: array
+    confidence: float
+    evidence: array
+    recommended_actions: array
+    notable_entities: array
+    notable_relationships: array
+
+escalation_rules:
+  - condition: "confirmed_credential_abuse"
+    severity: critical
+    notify: ["security_team", "soc_manager"]
+  - condition: "impossible_travel_confirmed"
+    severity: high
+    notify: ["security_team"]
+
+confidence_thresholds:
+  high: 0.85
+  medium: 0.6
+  low: 0.4
+
+timeout: 180

@@ -3,14 +3,13 @@
 import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { ArrowLeft, Play, Edit, Trash, Clock, Save, X } from 'lucide-react';
+import { ArrowLeft, Play, Edit, Trash2, Clock, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { QueryStatsCard } from '@/components/queries/query-stats-card';
 import { QueryExecutionResults } from '@/components/queries/query-execution-results';
 import { Label } from '@/components/ui/label';
-import { Textarea } from '@/components/ui/textarea'; // Ensure this exists or use html textarea
 import {
   Select,
   SelectContent,
@@ -21,6 +20,24 @@ import {
 import { toast } from 'sonner';
 import { formatDistanceToNow } from 'date-fns';
 import { PageLayout } from '@/components/layout/page-layout';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
 
 interface QueryDetails {
   id: string;
@@ -65,27 +82,24 @@ export default function QueryDetailPage() {
   const router = useRouter();
   const [query, setQuery] = useState<QueryDetails | null>(null);
   const [loading, setLoading] = useState(true);
-  
-  // Execution State
   const [executing, setExecuting] = useState(false);
   const [executionResults, setExecutionResults] = useState<any>(null);
   const [timeRange, setTimeRange] = useState('last_24h');
-
-  // Editing State
-  const [isEditing, setIsEditing] = useState(false);
-  const [editedSpl, setEditedSpl] = useState('');
-  const [isSaving, setIsSaving] = useState(false);
+  const [editDialogOpen, setEditDialogOpen] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [editForm, setEditForm] = useState({
+    name: '',
+    description: '',
+    splQuery: '',
+    category: 'other',
+    severity: '',
+    mitreAttack: '',
+  });
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
 
   useEffect(() => {
     fetchQuery();
   }, [params.id]);
-
-  // Update local edit state when query loads
-  useEffect(() => {
-    if (query) {
-      setEditedSpl(query.splQuery);
-    }
-  }, [query]);
 
   const fetchQuery = async () => {
     try {
@@ -97,37 +111,6 @@ export default function QueryDetailPage() {
       toast.error('Failed to load query details');
     } finally {
       setLoading(false);
-    }
-  };
-
-  const handleUpdateQuery = async () => {
-    setIsSaving(true);
-    try {
-      // Assuming your API supports PATCH to update details
-      const response = await fetch(`/api/queries/${params.id}`, {
-        method: 'PATCH', 
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ splQuery: editedSpl }),
-      });
-
-      if (!response.ok) throw new Error('Failed to update query');
-      const updatedQuery = await response.json();
-      setQuery((prev) => {
-          if (!prev) return null;
-          return {
-              ...prev,
-              ...updatedQuery
-          };
-      });
-      setIsEditing(false);
-      toast.success('Query updated successfully');
-      
-      // Optional: Auto-run after save?
-      // executeQuery(); 
-    } catch (error) {
-      toast.error('Failed to save 676767676767 query changes');
-    } finally {
-      setIsSaving(false);
     }
   };
 
@@ -152,8 +135,6 @@ export default function QueryDetailPage() {
           earliestTime: range.earliest,
           latestTime: range.latest,
           executedBy: 'user',
-          // If your backend supports ad-hoc execution without saving, pass splQuery here:
-          // splQuery: isEditing ? editedSpl : query?.splQuery 
         }),
       });
 
@@ -176,9 +157,11 @@ export default function QueryDetailPage() {
     }
   };
 
-  const deleteQuery = async () => {
-    if (!confirm('Are you sure you want to delete this query?')) return;
+  const handleDeleteClick = () => {
+    setDeleteDialogOpen(true);
+  };
 
+  const handleDeleteConfirm = async () => {
     try {
       const response = await fetch(`/api/queries/${params.id}`, {
         method: 'DELETE',
@@ -187,10 +170,52 @@ export default function QueryDetailPage() {
       if (!response.ok) throw new Error('Failed to delete query');
 
       toast.success('Query deleted successfully');
-
+      setDeleteDialogOpen(false);
       router.push('/queries');
     } catch (error) {
       toast.error('Failed to delete query');
+    }
+  };
+
+  const openEditDialog = () => {
+    if (query) {
+      setEditForm({
+        name: query.name,
+        description: query.description || '',
+        splQuery: query.splQuery,
+        category: query.category,
+        severity: query.severity || '',
+        mitreAttack: query.mitreAttack || '',
+      });
+      setEditDialogOpen(true);
+    }
+  };
+
+  const updateQuery = async () => {
+    setEditing(true);
+    try {
+      const response = await fetch(`/api/queries/${params.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: editForm.name,
+          description: editForm.description || null,
+          splQuery: editForm.splQuery,
+          category: editForm.category,
+          severity: editForm.severity || null,
+          mitreAttack: editForm.mitreAttack || null,
+        }),
+      });
+
+      if (!response.ok) throw new Error('Failed to update query');
+
+      toast.success('Query updated successfully');
+      setEditDialogOpen(false);
+      fetchQuery();
+    } catch (error) {
+      toast.error('Failed to update query');
+    } finally {
+      setEditing(false);
     }
   };
 
@@ -231,8 +256,12 @@ export default function QueryDetailPage() {
         </div>
       </div>
       <div className="flex gap-2">
-        <Button variant="outline" size="sm" onClick={deleteQuery}>
-          <Trash className="h-4 w-4 mr-2" />
+        <Button variant="outline" size="sm" onClick={openEditDialog}>
+          <Edit className="h-4 w-4 mr-2" />
+          Edit
+        </Button>
+        <Button variant="outline" size="sm" onClick={handleDeleteClick}>
+          <Trash2 className="h-4 w-4 mr-2" />
           Delete
         </Button>
       </div>
@@ -281,46 +310,12 @@ export default function QueryDetailPage() {
               </div>
             )}
           </div>
-          
-          {/* SPL Query Section with Edit Functionality */}
           <div>
-            <div className="flex items-center justify-between mb-2">
-                <Label className="text-muted-foreground">SPL Query</Label>
-                {!isEditing ? (
-                    <Button variant="ghost" size="sm" onClick={() => setIsEditing(true)}>
-                        <Edit className="h-4 w-4 mr-2" />
-                        Edit Query
-                    </Button>
-                ) : (
-                    <div className="flex gap-2">
-                        <Button variant="ghost" size="sm" onClick={() => {
-                            setIsEditing(false);
-                            setEditedSpl(query.splQuery); // Reset
-                        }}>
-                            <X className="h-4 w-4 mr-2" />
-                            Cancel
-                        </Button>
-                        <Button size="sm" onClick={handleUpdateQuery} disabled={isSaving}>
-                            <Save className="h-4 w-4 mr-2" />
-                            Save
-                        </Button>
-                    </div>
-                )}
-            </div>
-            
-            {isEditing ? (
-                <Textarea 
-                    value={editedSpl}
-                    onChange={(e) => setEditedSpl(e.target.value)}
-                    className="font-mono text-sm min-h-[120px]"
-                />
-            ) : (
-                <pre className="p-4 bg-muted rounded-md overflow-x-auto whitespace-pre-wrap">
-                    <code className="text-sm">{query.splQuery}</code>
-                </pre>
-            )}
+            <Label className="text-muted-foreground">SPL Query</Label>
+            <pre className="mt-2 p-4 bg-muted rounded-md overflow-x-auto">
+              <code className="text-sm">{query.splQuery}</code>
+            </pre>
           </div>
-
           <div className="flex gap-4 text-sm text-muted-foreground">
             <div>
               <Clock className="h-4 w-4 inline mr-1" />
@@ -360,7 +355,7 @@ export default function QueryDetailPage() {
                 </SelectContent>
               </Select>
             </div>
-            <Button onClick={executeQuery} disabled={executing || isEditing}>
+            <Button onClick={executeQuery} disabled={executing}>
               {executing ? (
                 'Executing...'
               ) : (
@@ -371,27 +366,16 @@ export default function QueryDetailPage() {
               )}
             </Button>
           </div>
-          {isEditing && (
-              <p className="text-xs text-amber-500">
-                  * Save your query changes before running execution.
-              </p>
-          )}
         </CardContent>
       </Card>
 
       {/* Results */}
       {executionResults && (
-        <div className="grid grid-cols-1">
-          <div className="w-full overflow-x-auto pb-4">
-             <div className="min-w-max"> 
-              <QueryExecutionResults
-                results={executionResults.results || []}
-                executionTimeMs={executionResults.executionTimeMs}
-                error={executionResults.error}
-              />
-            </div>
-          </div>
-        </div>
+        <QueryExecutionResults
+          results={executionResults.results || []}
+          executionTimeMs={executionResults.executionTimeMs}
+          error={executionResults.error}
+        />
       )}
 
       {/* Recent Findings */}
@@ -421,6 +405,125 @@ export default function QueryDetailPage() {
         </Card>
       )}
       </div>
+
+      {/* Edit Dialog */}
+      <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Edit Query</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="edit-name">Query Name *</Label>
+              <Input
+                id="edit-name"
+                value={editForm.name}
+                onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
+                placeholder="Query name"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="edit-description">Description</Label>
+              <Textarea
+                id="edit-description"
+                value={editForm.description}
+                onChange={(e) => setEditForm({ ...editForm, description: e.target.value })}
+                placeholder="Describe what this query detects"
+                rows={3}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="edit-splQuery">SPL Query *</Label>
+              <Textarea
+                id="edit-splQuery"
+                value={editForm.splQuery}
+                onChange={(e) => setEditForm({ ...editForm, splQuery: e.target.value })}
+                placeholder="Enter SPL query"
+                rows={6}
+                className="font-mono text-sm"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="edit-category">Category</Label>
+              <Select 
+                value={editForm.category} 
+                onValueChange={(value) => setEditForm({ ...editForm, category: value })}
+              >
+                <SelectTrigger id="edit-category">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {Object.entries(categoryLabels).map(([value, label]) => (
+                    <SelectItem key={value} value={value}>
+                      {label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="edit-severity">Severity</Label>
+              <Select 
+                value={editForm.severity} 
+                onValueChange={(value) => setEditForm({ ...editForm, severity: value })}
+              >
+                <SelectTrigger id="edit-severity">
+                  <SelectValue placeholder="Select severity" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="critical">Critical</SelectItem>
+                  <SelectItem value="high">High</SelectItem>
+                  <SelectItem value="medium">Medium</SelectItem>
+                  <SelectItem value="low">Low</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="edit-mitre">MITRE ATT&CK Technique</Label>
+              <Input
+                id="edit-mitre"
+                value={editForm.mitreAttack}
+                onChange={(e) => setEditForm({ ...editForm, mitreAttack: e.target.value })}
+                placeholder="e.g., T1110, T1078"
+              />
+            </div>
+            <div className="flex justify-end gap-3 pt-4 border-t">
+              <Button
+                variant="outline"
+                onClick={() => setEditDialogOpen(false)}
+                disabled={editing}
+              >
+                <X className="h-4 w-4 mr-2" />
+                Cancel
+              </Button>
+              <Button 
+                onClick={updateQuery} 
+                disabled={editing || !editForm.name || !editForm.splQuery}
+              >
+                {editing ? 'Saving...' : 'Save Changes'}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Are you sure?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently delete the query "{query.name}". This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDeleteConfirm} className="bg-red-600 hover:bg-red-700">
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </PageLayout>
   );
 }

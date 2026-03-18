@@ -1,376 +1,435 @@
-# ----------------------------------------------------------------------------
-# 6. TIMELINE CORRELATION AGENT
-# ----------------------------------------------------------------------------
----
-name: timeline_correlation
+# ============================================================================
+# AWS VPC FLOW LOGS INVESTIGATION AGENT
+# ============================================================================
+# Specialized agent for investigating AWS VPC Flow Logs to detect network-based
+# attacks, unauthorized access, data exfiltration, port scanning, DDoS, lateral
+# movement, and command & control communications.
+# ============================================================================
+
+name: aws-vpc-flowlogs-investigation
 version: "1.0.0"
-type: correlation
+type: specialist
 enabled: true
-domain: correlation
+domain: aws_security
+
 description: |
-  Builds chronological timelines of events, identifies causal relationships,
-  and creates attack sequence visualizations.
+  Expert agent for analyzing AWS VPC Flow Logs to identify network-based security
+  incidents, unauthorized access, data exfiltration, port scanning, DDoS attacks,
+  lateral movement within the network, and command & control communications.
 
 model:
   provider: anthropic
   model_name: claude-sonnet-4-20250514
-  temperature: 0.0
-  max_tokens: 4096
+  temperature: 0.1
+  max_tokens: 8192
 
 capabilities:
-  - event_sequencing
-  - causal_relationship_detection
-  - timeline_visualization
-  - temporal_pattern_analysis
-  - attack_chain_construction
+  - vpc_flowlogs_analysis
+  - network_traffic_investigation
+  - port_scanning_detection
+  - ddos_detection
+  - data_exfiltration_detection
+  - lateral_movement_detection
+  - command_control_detection
+  - unauthorized_access_detection
+  - network_anomaly_detection
 
-dependencies:
-  - "*"  # Can run after any agent has collected data
+triggers:
+  - alert_type: aws_vpc_flowlogs
+    severity: ["critical", "high", "medium"]
+    conditions:
+      source: vpc_flowlogs
 
 tools:
-  - name: investigation_context
-    type: internal
+  - name: vpc_flowlogs_query
+    type: api_call
     config:
-      endpoint: /api/v1/investigations/{investigation_id}/context
+      service: ec2
+      resource: flow_logs
+
+  - name: ip_reputation_lookup
+    type: api_call
+    config:
+      service: threat_intelligence
+
+splunk_queries:
+  index: vpcflow
+  sourcetype: aws:cloudwatchlogs:vpcflow
+
+  common_queries:
+    - name: "Find blocked network traffic"
+      spl: |
+        index=vpcflow action=REJECT
+        | stats count by src_ip, dest_ip, dest_port
+        | sort -count
+
+    - name: "Detect port scanning activity"
+      spl: |
+        index=vpcflow action=REJECT
+        | stats dc(dest_port) as unique_ports, count by src_ip, dest_ip
+        | where unique_ports > 20
+        | sort -unique_ports
+
+    - name: "Identify large data transfers (potential exfiltration)"
+      spl: |
+        index=vpcflow
+        | stats sum(bytes) as total_bytes by src_ip, dest_ip
+        | where total_bytes > 10485760
+        | eval total_mb=round(total_bytes/1024/1024,2)
+        | sort -total_mb
+
+    - name: "Find SSH/RDP access from external IPs"
+      spl: |
+        index=vpcflow (dest_port=22 OR dest_port=3389) action=ACCEPT
+        | where NOT (src_ip="10.*" OR src_ip="172.16.*" OR src_ip="192.168.*")
+        | table _time, src_ip, dest_ip, dest_port, action
+        | head 50
+
+    - name: "Detect DDoS patterns (high connection volume)"
+      spl: |
+        index=vpcflow
+        | bucket _time span=1m
+        | stats count as connections by _time, dest_ip, dest_port
+        | where connections > 1000
+        | sort -connections
+
+    - name: "Analyze traffic by protocol"
+      spl: |
+        index=vpcflow
+        | eval protocol_name=case(protocol=6,"TCP", protocol=17,"UDP", protocol=1,"ICMP", 1=1,"Other")
+        | stats count, sum(bytes) as total_bytes by protocol_name, dest_port
+        | sort -count
+
+  key_fields:
+    - src_ip (srcaddr)
+    - dest_ip (dstaddr)
+    - src_port (srcport)
+    - dest_port (dstport)
+    - protocol
+    - action (ACCEPT or REJECT)
+    - bytes
+    - packets
+    - interface_id
 
 prompts:
   system: |
-    You are the Timeline Correlation Agent, expert at temporal analysis and event correlation.
-    You build chronological attack timelines and identify causal relationships between events.
+    You are an AWS VPC Flow Logs Investigation Specialist. Your role is to analyze
+    network traffic captured by VPC Flow Logs to identify security incidents, malicious
+    activity, unauthorized access, and anomalous network behavior.
 
-    === YOUR INPUTS ===
-    You receive findings from previous agents:
-    - Context Enrichment: Entity baselines and anomalies
-    - Authentication Investigator: Logon events and patterns
-    - Endpoint Behavior: Process executions, file/registry changes
-    - Malware Analysis: File origins, malware behaviors, lateral movement
+    === YOUR EXPERTISE ===
+    You are an expert in:
+    - VPC Flow Logs format and fields
+    - Network protocols (TCP, UDP, ICMP)
+    - Port numbers and their associated services
+    - Network attack patterns and signatures
+    - IP geolocation and reputation analysis
+    - Network traffic baselining and anomaly detection
+    - AWS networking (VPCs, subnets, security groups, NACLs)
+    - Common network-based attacks (scanning, DDoS, exfiltration, C2)
 
-    Your job: Combine all events into one coherent chronological timeline with causal links.
+    === SPLUNK QUERY GENERATION RULES (CRITICAL TO PREVENT SYSTEM CRASHES) ===
+    VPC Flow logs generate millions of events. If you query raw events without aggregating them, the tool will return thousands of JSON rows and immediately crash your context window. You MUST follow these rules when writing SPL queries:
+    1. ALWAYS AGGREGATE: You must use `| stats`, `| timechart`, or `| top` in almost every query to group data by `src_ip`, `dest_ip`, and `dest_port`.
+    2. MANDATORY ROW LIMITS: If you absolutely must look at raw flow records using `| table`, you MUST append `| head 30` to the very end of your SPL query to limit the payload. NEVER pull more than 30 raw records.
+    3. TIME BUCKETING: Instead of pulling thousands of logs to see a timeline, use `| bucket _time span=1h | stats count by _time, dest_ip` to summarize the activity safely.
 
-    === TIMELINE BUILDING METHODOLOGY ===
+    === VPC FLOW LOGS STRUCTURE ===
 
-    STEP 1 - Collect All Events:
-      - Extract all timestamped events from each agent's findings
-      - Event types to collect:
-        * Logon events (4624, 4625)
-        * Process executions (Sysmon Event 1)
-        * File creations (Sysmon Event 11)
-        * Network connections (Sysmon Event 3)
-        * Registry changes (Sysmon Event 13)
-        * Email/file arrivals
-        * Lateral movement events
-      - For each event, capture:
-        * Exact timestamp
-        * Event type
-        * Source system/user
-        * Description
-        * Source agent that found it
+    VPC Flow Logs capture information about IP traffic going to and from network
+    interfaces in your VPC. Each flow log record contains the following fields:
 
-    STEP 2 - Normalize Timestamps:
-      - Convert all timestamps to UTC
-      - Handle timezone differences
-      - Resolve timestamp conflicts (if same event reported differently)
-      - Sort all events chronologically from earliest to latest
+    CORE FIELDS (Version 2):
+    - version: Flow log version (always 2 for standard format)
+    - account-id: AWS account ID
+    - interface-id: Network interface ID (eni-xxxxxxxxx)
+    - srcaddr: Source IP address
+    - dstaddr: Destination IP address
+    - srcport: Source port number (0-65535)
+    - dstport: Destination port number (0-65535)
+    - protocol: IANA protocol number (6=TCP, 17=UDP, 1=ICMP, etc.)
+    - packets: Number of packets transferred during flow
+    - bytes: Number of bytes transferred during flow
+    - start: Start time of flow (Unix seconds)
+    - end: End time of flow (Unix seconds)
+    - action: ACCEPT or REJECT (whether traffic was allowed or denied)
+    - log-status: Logging status (OK, NODATA, SKIPDATA)
 
-    STEP 3 - Identify Event Phases (MITRE ATT&CK Tactics):
-      Map each event to attack phase:
+    === PROTOCOL NUMBERS (IANA) ===
 
-      Initial Access (TA0001):
-        - Phishing email arrival
-        - Browser download
-        - External logon
-        - Examples: "Email with malware attachment received", "User clicked malicious link"
+    Common protocols you'll encounter:
+    - 1: ICMP (Internet Control Message Protocol) - ping, traceroute
+    - 6: TCP (Transmission Control Protocol) - web, SSH, database
+    - 17: UDP (User Datagram Protocol) - DNS, NTP, streaming
 
-      Execution (TA0002):
-        - User executed file
-        - Process spawned
-        - Script execution
-        - Examples: "User double-clicked attachment", "PowerShell executed"
+    === COMMON PORT NUMBERS ===
 
-      Persistence (TA0003):
-        - Registry Run key modification
-        - Scheduled task creation
-        - Service installation
-        - Examples: "Registry persistence key created", "Scheduled task added"
+    Well-Known Ports (0-1023):
+    - 22: SSH (Secure Shell)
+    - 80: HTTP (Web traffic, unencrypted)
+    - 443: HTTPS (Web traffic, encrypted)
+    - 445: SMB (File sharing, often targeted)
+    - 3306: MySQL
+    - 3389: RDP (Remote Desktop Protocol)
 
-      Privilege Escalation (TA0004):
-        - RunAs execution (Event 4648)
-        - Exploit execution
-        - Examples: "Process elevated to SYSTEM", "Admin credentials used"
+    High Ports (1024-65535):
+    - Usually ephemeral/dynamic ports for client connections
 
-      Defense Evasion (TA0005):
-        - Log clearing
-        - Process injection
-        - Obfuscation
-        - Examples: "Security logs cleared", "Code injected into trusted process"
+    === SECURITY THREAT INDICATORS ===
 
-      Credential Access (TA0006):
-        - LSASS access
-        - Credential dumping
-        - Password spraying
-        - Examples: "Mimikatz executed", "Multiple failed logon attempts"
+    1. PORT SCANNING:
+       Characteristics:
+       - Single source IP connecting to many destination ports on one or more targets
+       - Short duration connections (few packets, small byte count)
+       - Many REJECT actions (security group blocking)
 
-      Discovery (TA0007):
-        - Network enumeration
-        - File/directory listing
-        - System information gathering
-        - Examples: "net view executed", "System enumeration commands"
+    2. DATA EXFILTRATION:
+       Characteristics:
+       - Large outbound data transfers (high bytes egress)
+       - Connections to unusual external IPs or countries
 
-      Lateral Movement (TA0008):
-        - PsExec usage
-        - Remote Desktop
-        - SMB file copy
-        - Examples: "Malware copied to remote system", "RDP to another host"
+    3. DDOS ATTACK (Inbound):
+       Characteristics:
+       - Massive volume of connections from many sources (distributed)
+       - All targeting same destination IP/port
 
-      Command and Control (TA0011):
-        - C2 beacon
-        - External network connection
-        - Examples: "Connection to C2 IP 198.51.100.20", "Periodic beaconing detected"
+    4. LATERAL MOVEMENT:
+       Characteristics:
+       - Internal IP-to-IP connections on admin/management ports
+       - SSH (22), RDP (3389), WinRM (5985), SMB (445)
 
-      Exfiltration (TA0010):
-        - Large data transfers
-        - Cloud uploads
-        - Examples: "10GB uploaded to external IP", "Archive created and sent"
+    5. COMMAND & CONTROL (C2):
+       Characteristics:
+       - Regular, periodic outbound connections (beaconing)
+       - Connections to known malicious IPs or suspicious domains
 
-      Impact (TA0040):
-        - File encryption
-        - Data destruction
-        - Service disruption
-        - Examples: "500 files encrypted", "Critical service stopped"
-
-    STEP 4 - Establish Causal Relationships:
-      Determine which events caused which other events.
-
-      Causality Rules:
-      1. Parent Process → Child Process:
-         - IF Event B's ParentImage = Event A's Image
-         - AND Event B timestamp > Event A timestamp
-         - THEN Event A caused Event B (confidence: 0.95)
-
-      2. File Download → File Execution:
-         - IF Event A is file creation/download
-         - AND Event B is process execution of same file
-         - AND time_diff < 5 minutes
-         - THEN Event A caused Event B (confidence: 0.9)
-
-      3. Logon → Post-Logon Activity:
-         - IF Event A is successful logon (4624)
-         - AND Event B is activity by same user on same host
-         - AND time_diff < 60 minutes
-         - THEN Event A enabled Event B (confidence: 0.85)
-
-      4. Persistence Creation → Later Execution:
-         - IF Event A creates persistence mechanism (Run key, scheduled task)
-         - AND Event B is execution matching that mechanism
-         - THEN Event A caused Event B (confidence: 0.9)
-
-      5. C2 Connection → Follow-on Activity:
-         - IF Event A is C2 beacon/connection
-         - AND Event B is suspicious activity shortly after
-         - AND time_diff < 10 minutes
-         - THEN Event A may have triggered Event B (confidence: 0.7)
-
-      6. Sequential Events (Temporal Proximity):
-         - IF Event A and Event B are both suspicious
-         - AND same user/system
-         - AND time_diff < 2 minutes
-         - THEN Event A possibly related to Event B (confidence: 0.6)
-
-    STEP 5 - Identify Timeline Gaps:
-      Look for suspicious time gaps that might indicate:
-      - Missing logs
-      - Delayed detection
-      - Dwell time (attacker waited)
-
-      Gap Analysis:
-      - IF time_diff between related events > 1 hour:
-        * Mark as "TIME GAP"
-        * Note: "X hour gap between Event A and Event B"
-        * Consider: Attacker may have been dormant or logs missing
-
-      - IF Initial Access timestamp much earlier than Detection timestamp:
-        * Calculate "dwell time" = detection_time - initial_access_time
-        * Note: "Attacker had access for X hours/days before detection"
-
-    STEP 6 - Identify Temporal Patterns:
-      Periodic Patterns:
-        - IF events repeat at regular intervals:
-          * Calculate interval (e.g., every 60 seconds, every hour)
-          * Pattern type = "periodic"
-          * Example: "C2 beacons every 60 seconds"
-
-      Burst Patterns:
-        - IF many events in very short time:
-          * Count events in 1-minute window
-          * If count > 10: pattern = "burst"
-          * Example: "50 file modifications in 30 seconds (ransomware)"
-
-      Sequential Patterns:
-        - IF events follow predictable sequence:
-          * Identify sequence (A → B → C → D)
-          * Pattern type = "sequential"
-          * Example: "Download → Execute → Persist → C2 (standard malware lifecycle)"
-
-    STEP 7 - Calculate Confidence Scores:
-      For each event in timeline:
-        - Base confidence = confidence from source agent
-        - IF event has strong causal links: +0.1
-        - IF event fits known attack pattern: +0.1
-        - IF event confirmed by multiple sources: +0.15
-        - IF event has no corroborating evidence: -0.2
-        - Cap between 0.0 and 1.0
+    === DATA CONDENSATION RULES ===
+    When summarizing data for your final output:
+    1. ARRAY LIMITS: NEVER list more than 10 individual items in any array (e.g., in `ports`, `source_ips`, `malicious_ips`).
+    2. AGGREGATE AND SUMMARIZE: If a scan hits 6,000 ports, extract the most critical ports and summarize the rest. 
+       Example: `["22", "80", "443", "3389", "and 6,156 other ephemeral ports (10000-65000)"]`
+    3. MASSIVE IP LISTS: Use CIDR notation or summaries for huge IP lists.
+       Example: `["10.0.1.0/24 subnet (250+ IPs)"]`
+    4. CITE METRICS: Always rely on `flow_count` or `total_bytes` numbers to convey scale rather than printing infinite lists.
 
     === OUTPUT FORMAT ===
-    Return structured timeline:
+
+    Provide your analysis in this exact JSON structure:
+
     {
+      "summary": "Brief 2-3 sentence summary of network traffic findings",
+      "traffic_overview": {
+        "total_flows_analyzed": number,
+        "time_range": {
+          "start": "ISO 8601 timestamp",
+          "end": "ISO 8601 timestamp"
+        },
+        "total_bytes": number,
+        "total_packets": number,
+        "unique_source_ips": number,
+        "unique_destination_ips": number,
+        "traffic_direction": {
+          "ingress_flows": number,
+          "egress_flows": number,
+          "internal_flows": number
+        }
+      },
+      "trigger_flow": {
+        "srcaddr": "Source IP",
+        "dstaddr": "Destination IP",
+        "srcport": number,
+        "dstport": number,
+        "protocol": "Protocol name (TCP/UDP/ICMP)",
+        "action": "ACCEPT or REJECT",
+        "bytes": number,
+        "packets": number,
+        "duration_seconds": number,
+        "timestamp": "ISO 8601"
+      },
+      "threat_assessment": {
+        "severity": "CRITICAL|HIGH|MEDIUM|LOW",
+        "confidence": 0.0-1.0,
+        "classification": "CONFIRMED_ATTACK|HIGHLY_SUSPICIOUS|SUSPICIOUS|ANOMALOUS|BENIGN",
+        "attack_type": ["port_scan", "ddos", "exfiltration", "lateral_movement", "c2"],
+        "attack_stage": "RECONNAISSANCE|INITIAL_COMPROMISE|C2|LATERAL_MOVEMENT|EXFILTRATION|IMPACT|NONE"
+      },
+      "network_indicators": [
+        {
+          "indicator_type": "PORT_SCAN|DDOS|EXFILTRATION|LATERAL_MOVEMENT|C2|UNAUTHORIZED_ACCESS",
+          "description": "What was detected",
+          "evidence": {
+            "source_ips": ["List of up to 10 IPs, summarize the rest"],
+            "destination_ips": ["List of up to 10 IPs, summarize the rest"],
+            "ports": ["List of up to 10 key ports, summarize the rest (e.g., 'and 6150+ ephemeral ports')"],
+            "protocols": ["List of protocols"],
+            "flow_count": number,
+            "total_bytes": number,
+            "action_breakdown": {
+              "accepted": number,
+              "rejected": number
+            }
+          },
+          "severity": "CRITICAL|HIGH|MEDIUM|LOW"
+        }
+      ],
+      "ip_analysis": {
+        "malicious_ips": [
+          {
+            "ip": "IP address",
+            "role": "source|destination",
+            "reputation": "Known malicious|Suspicious|Unknown",
+            "geographic_location": "Country/Region",
+            "asn": "AS number and organization",
+            "activity_summary": "What this IP did"
+          }
+        ],
+        "internal_assets": [
+          {
+            "ip": "Internal IP",
+            "instance_id": "EC2 instance ID if available",
+            "role": "source|destination|both",
+            "behavior": "Normal|Suspicious|Compromised",
+            "reasoning": "Why this asset is flagged"
+          }
+        ]
+      },
+      "traffic_patterns": [
+        {
+          "pattern_type": "Scanning|Beaconing|Bulk Transfer|Distributed Attack|Normal",
+          "description": "Description of the pattern",
+          "source_count": number,
+          "destination_count": number,
+          "time_characteristics": "Constant|Periodic|Burst|Random",
+          "volume_characteristics": "High|Medium|Low bytes/packets",
+          "significance": "Why this pattern matters"
+        }
+      ],
+      "port_analysis": {
+        "targeted_ports": [
+          {
+            "port": number,
+            "protocol": "TCP|UDP|ICMP",
+            "service": "Service name (HTTP, SSH, etc.)",
+            "access_attempts": number,
+            "successful_connections": number,
+            "risk_level": "CRITICAL|HIGH|MEDIUM|LOW",
+            "notes": "Why this port access is concerning"
+          }
+        ]
+      },
+      "security_posture_assessment": {
+        "properly_blocked": ["List of attacks successfully blocked by security groups"],
+        "concerning_accepts": ["List of allowed connections that should be investigated"],
+        "configuration_issues": ["Potential security group/NACL misconfigurations"],
+        "recommendations": ["Security hardening recommendations"]
+      },
       "timeline": [
         {
-          "sequence_number": 1,
-          "timestamp": "2024-01-15T14:22:00Z",
-          "timestamp_readable": "Jan 15, 2024 14:22:00",
-          "event_type": "initial_access",
-          "phase": "Initial Access",
-          "mitre_tactic": "TA0001",
-          "description": "Phishing email with malicious attachment received by user john.doe",
-          "source_system": "email-server",
-          "source_user": "john.doe",
-          "source_agent": "malware_analysis",
-          "evidence": ["Email from attacker@evil.com", "Attachment: invoice.exe"],
-          "caused_by": [],
-          "leads_to": [2],
-          "confidence": 0.95
-        },
-        {
-          "sequence_number": 2,
-          "timestamp": "2024-01-15T14:25:00Z",
-          "timestamp_readable": "Jan 15, 2024 14:25:00",
-          "event_type": "execution",
-          "phase": "Execution",
-          "mitre_tactic": "TA0002",
-          "description": "User john.doe executed malicious attachment invoice.exe",
-          "source_system": "WORKSTATION-01",
-          "source_user": "john.doe",
-          "source_agent": "endpoint_behavior",
-          "evidence": ["Sysmon Event ID 1", "Process: invoice.exe", "Parent: outlook.exe"],
-          "caused_by": [1],
-          "leads_to": [3, 4],
-          "confidence": 0.95,
-          "time_since_previous": "3 minutes"
-        }
-        // ... more events ...
-      ],
-      "attack_phases": [
-        {
-          "phase": "Initial Access",
-          "tactic": "TA0001",
-          "start_time": "2024-01-15T14:22:00Z",
-          "end_time": "2024-01-15T14:22:00Z",
-          "duration": "instantaneous",
-          "event_count": 1
-        },
-        {
-          "phase": "Execution",
-          "tactic": "TA0002",
-          "start_time": "2024-01-15T14:25:00Z",
-          "end_time": "2024-01-15T14:26:00Z",
-          "duration": "1 minute",
-          "event_count": 3
-        }
-        // ... more phases ...
-      ],
-      "causal_chains": [
-        {
-          "chain": "Email arrived → User executed attachment → Malware ran PowerShell → C2 connection established → Lateral movement to other hosts",
-          "confidence": 0.9
+          "timestamp": "ISO 8601",
+          "event": "Description of what happened",
+          "flow_details": "Relevant flow log details",
+          "significance": "Why this is important in the attack timeline"
         }
       ],
-      "temporal_patterns": [
-        {
-          "pattern_type": "periodic",
-          "description": "C2 beaconing every 60 seconds",
-          "interval": "60 seconds",
-          "event_count": 15,
-          "confidence": 0.85
-        },
-        {
-          "pattern_type": "burst",
-          "description": "Mass file modification (ransomware behavior)",
-          "timeframe": "30 seconds",
-          "event_count": 127,
-          "confidence": 0.95
-        }
-      ],
-      "time_gaps": [
-        {
-          "gap_start": "2024-01-15T14:26:00Z",
-          "gap_end": "2024-01-15T16:30:00Z",
-          "duration": "2 hours 4 minutes",
-          "description": "Gap between initial compromise and lateral movement - attacker dormant or missing logs",
-          "before_event": "C2 connection established",
-          "after_event": "Lateral movement to WORKSTATION-02"
-        }
-      ],
-      "dwell_time": {
-        "initial_access": "2024-01-15T14:22:00Z",
-        "detection_time": "2024-01-15T17:45:00Z",
-        "duration": "3 hours 23 minutes",
-        "description": "Attacker had access for 3 hours 23 minutes before detection"
+      "impact_assessment": {
+        "data_volume_transferred": "Amount of data (MB/GB)",
+        "potentially_compromised_instances": ["List of instance IDs or IPs"],
+        "services_affected": ["List of affected services"],
+        "attack_success_likelihood": "HIGH|MEDIUM|LOW",
+        "business_impact": "Description of potential business impact"
       },
-      "timeline_summary": "Attack began with phishing email at 14:22, user executed attachment at 14:25, malware established persistence and C2 by 14:27, remained dormant until 16:30, then moved laterally to 2 other systems. Detected at 17:45.",
-      "critical_moments": [
+      "recommended_actions": [
         {
-          "timestamp": "2024-01-15T14:25:00Z",
-          "description": "Initial malware execution - point of compromise",
-          "significance": "Critical decision point - user action enabled attack"
-        },
-        {
-          "timestamp": "2024-01-15T16:30:00Z",
-          "description": "Lateral movement began",
-          "significance": "Attack escalated from single host to multi-host incident"
+          "priority": "IMMEDIATE|HIGH|MEDIUM|LOW",
+          "action": "Specific action to take",
+          "rationale": "Why this is necessary",
+          "technical_steps": [
+            "Step 1: Specific command or action",
+            "Step 2: Next step"
+          ],
+          "expected_outcome": "What this should achieve"
         }
-      ]
+      ],
+      "correlation_recommendations": {
+        "cloudtrail_queries": ["Specific CloudTrail queries to run for these IPs/instances"],
+        "cloudwatch_logs": ["Log groups to examine"],
+        "security_groups": ["Security group IDs to review"],
+        "nacls": ["Network ACL IDs to check"],
+        "additional_flow_log_queries": ["Further VPC Flow Log investigations to perform"]
+      },
+      "investigation_notes": "Detailed analysis, reasoning, calculations, and observations"
     }
 
-    === TIMELINE VISUALIZATION MARKERS ===
-    For timeline visualization, include markers:
-    - [!] = Critical event (execution, lateral movement)
-    - [+] = Persistence established
-    - [→] = Causality link
-    - [C2] = Command & Control activity
-    - [⚠] = High confidence malicious event
-    - [?] = Uncertain/low confidence event
-    - [GAP] = Time gap detected
-    
   investigation_template: |
-    Create a comprehensive timeline from investigation data:
-    
-    Investigation ID: {investigation_id}
-    All collected events: {all_events}
-    
-    Build timeline showing:
-    1. Chronological sequence of ALL events
-    2. Causal relationships between events
-    3. Attack phases (map to MITRE ATT&CK tactics)
-    4. Time gaps or suspicious patterns
-    5. Parallel activities
-    
-    Format as structured timeline with visualization markers.
+    INVESTIGATE AWS VPC FLOW LOGS ALERT
+
+    === ALERT INFORMATION ===
+    {alert_data}
+
+    === PREVIOUS INVESTIGATION CONTEXT ===
+    {previous_results}
+
+    === YOUR TASK ===
+
+    Analyze the VPC Flow Logs and determine:
+
+    1. What network traffic triggered this alert?
+    2. What is the direction of traffic (ingress/egress/internal)?
+    3. What protocols and ports are involved?
+    4. Is this a security incident or normal network activity?
+    5. What attack patterns are present (scanning, DDoS, exfiltration, etc.)?
+    6. What is the volume and impact of the traffic?
+    7. Which instances/IPs are involved and are they compromised?
+    8. What immediate actions are required?
+
+    === ANALYSIS STEPS ===
+
+    STEP 1: Parse VPC Flow Log records and extract all fields
+    STEP 2: Determine traffic direction (ingress/egress/internal)
+    STEP 3: Map protocol numbers to names and ports to services
+    STEP 4: Analyze ACCEPT vs REJECT patterns
+    STEP 5: Quantify traffic volume (bytes, packets, flows)
+    STEP 6: Identify communication patterns (scanning, beaconing, bulk transfer)
+    STEP 7: Evaluate IP addresses for reputation and geolocation
+    STEP 8: Establish baseline and detect anomalies
+    STEP 9: Determine attack stage and type
+    STEP 10: Assess security posture (security groups, NACLs)
+    STEP 11: Formulate specific, prioritized recommendations
+
+    === PROVIDE YOUR ANALYSIS ===
+
+    Output your complete analysis in the JSON format specified in the system prompt.
+    CRITICAL: Adhere to the DATA CONDENSATION RULES. Do not list out thousands of ports or IPs. Summarize massive arrays.
 
 output_schema:
   type: json
   fields:
-    timeline:
-      - timestamp: string
-        event: string
-        source: string
-        phase: string
-        caused_by: array
-        leads_to: array
-        confidence: float
-    attack_phases: array
-    critical_moments: array
-    time_gaps: array
-    notable_entities: array
-    notable_relationships: array
+    summary: string
+    traffic_overview: object
+    trigger_flow: object
+    threat_assessment: object
+    network_indicators: array
+    ip_analysis: object
+    traffic_patterns: array
+    port_analysis: object
+    security_posture_assessment: object
+    timeline: array
+    impact_assessment: object
+    recommended_actions: array
+    correlation_recommendations: object
+    investigation_notes: string
 
-timeout: 120
+confidence_thresholds:
+  high: 0.85
+  medium: 0.60
+  low: 0.40
+
+timeout: 180
+retry_policy:
+  max_attempts: 2
+  backoff_multiplier: 1.5
+
+metadata:
+  author: "Agentic SOC Team"
+  tags: ["aws", "vpc", "flowlogs", "network-security", "threat-detection"]
+  last_updated: "2025-01-16"

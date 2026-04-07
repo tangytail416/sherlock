@@ -48,7 +48,7 @@ export function StartInvestigationButton({ alertId }: StartInvestigationButtonPr
   }
 
   return (
-    <Button onClick={handleStartInvestigation} disabled={isLoading}>
+    <Button variant="outline" size="sm" onClick={handleStartInvestigation} disabled={isLoading}>
       {isLoading ? (
         <>
           <Loader2 className="mr-2 h-4 w-4 animate-spin" />

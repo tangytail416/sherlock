@@ -50,14 +50,9 @@ export function GenerateReportButton({
     }
   };
 
-  // Show Regenerate for completed investigations with existing reports
   if (existingReportId && investigationStatus === 'completed') {
     return (
-      <Button
-        onClick={handleGenerateReport}
-        disabled={generating}
-        variant="outline"
-      >
+      <Button onClick={handleGenerateReport} variant="outline" disabled={generating}>
         {generating ? (
           <>
             <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -73,7 +68,6 @@ export function GenerateReportButton({
     );
   }
 
-  // Show View Report for non-completed investigations with reports
   if (existingReportId) {
     return (
       <Button onClick={() => router.push(`/reports/${existingReportId}`)}>
@@ -83,7 +77,6 @@ export function GenerateReportButton({
     );
   }
 
-  // Show Generate Report button
   return (
     <Button
       onClick={handleGenerateReport}

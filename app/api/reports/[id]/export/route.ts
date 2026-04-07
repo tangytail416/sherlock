@@ -36,7 +36,7 @@ export async function GET(
       impact_assessment: content?.impact_assessment || {},
       conclusion: content?.conclusion || '',
     };
-    const severity = content?.severity || report.investigation.alert.severity;
+    const severity = content?.severity || report.investigation?.alert?.severity || 'MEDIUM';
     
     // Helper function to extract markdown sections
     function extractMarkdownSection(markdown: string, sectionName: string): string {
@@ -406,7 +406,7 @@ export async function GET(
         </div>
         <div class="report-meta-item">
           <span>🔍</span>
-          <span>Investigation: ${report.investigation.id.slice(0, 8)}</span>
+          <span>${report.investigation ? `Investigation: ${report.investigation.id.slice(0, 8)}` : 'Aggregated Report'}</span>
         </div>
         <div class="report-meta-item">
           <span>Severity:</span>
@@ -572,8 +572,13 @@ export async function GET(
 
     <!-- Report Footer -->
     <div class="report-footer">
-      <p><strong>Alert Source:</strong> ${report.investigation.alert.source}</p>
-      <p><strong>Original Alert Time:</strong> ${format(new Date(report.investigation.alert.timestamp), 'MMMM d, yyyy HH:mm:ss')}</p>
+      ${report.investigation ? `
+        <p><strong>Alert Source:</strong> ${report.investigation.alert.source}</p>
+        <p><strong>Original Alert Time:</strong> ${format(new Date(report.investigation.alert.timestamp), 'MMMM d, yyyy HH:mm:ss')}</p>
+      ` : `
+        <p><strong>Report Type:</strong> Aggregated Summary Report</p>
+        <p><strong>Reports Combined:</strong> ${(report.content as any)?.aggregatedFrom?.length || 'Multiple'}</p>
+      `}
       <p style="margin-top: 20px; opacity: 0.7;">
         This report was generated automatically by the Security Operations Center (SOC) Investigation System.
       </p>

@@ -111,10 +111,10 @@ export function ProviderCard({ provider, onTest, onDelete, onEdit, onSetDefault 
                   <span className="ml-2 font-mono text-xs">{provider.baseUrl}</span>
                 </div>
               )}
-              <div className="col-span-2">
+              {provider.apiKey&&(<div className="col-span-2">
                 <span className="text-muted-foreground">API Key:</span>
-                <span className="ml-2 font-mono text-xs">{provider.apiKey}</span>
-              </div>
+               <span className="ml-2 font-mono text-xs">{provider.apiKey}</span>
+              </div>)}
             </div>
 
             {testResult && (

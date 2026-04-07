@@ -109,16 +109,29 @@ export class UnifiedAIClient implements AIClient {
       console.error('Error details:', JSON.stringify(error, null, 2));
       
       // Check for context length errors
-      if (error?.message?.toLowerCase().includes('context') || 
-          error?.message?.toLowerCase().includes('token') ||
+	const errMsg = error?.message?.toLowerCase() || '';
+      
+      // 1. Check for Rate Limits (TPM/RPM)
+      if (errMsg.includes('rate limit') || errMsg.includes('too many requests') || error?.status === 429) {
+        throw new Error(`API Rate Limit Exceeded: ${error?.message || 'Wait a moment before trying again.'}`);
+      }
+
+      // 2. Check for Billing/Auth issues
+      if (errMsg.includes('balance') || errMsg.includes('credit') || error?.status === 402) {
+        throw new Error(`API Billing Error: ${error?.message || 'Out of credits.'}`);
+      }
+
+      // 3. True Context Length Errors
+      if (errMsg.includes('context length') || 
+          errMsg.includes('exceeds max') ||
           error?.code === 'context_length_exceeded') {
         throw new Error(`Context too large: ${estimatedTokens.toLocaleString()} estimated tokens. Model: ${this.config.modelName}. Try reducing the input context or using a model with larger context window.`);
-      }
-      
-      throw error;
+      }      
+	  throw error;
+	 }
     }
   }
-}
+
 
 /**
  * Get AI provider configuration from database
@@ -232,9 +245,9 @@ export async function createAIClient(providerType: string, customConfig?: Partia
     }
   }
 
-  if (!config.apiKey) {
+  /*if (!config.apiKey) {
     throw new Error(`API key not found for provider: ${providerType}. Please configure the provider in settings.`);
-  }
+  }*/
 
   return new UnifiedAIClient(config);
 }

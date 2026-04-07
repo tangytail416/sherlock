@@ -87,7 +87,7 @@ export async function POST(request: NextRequest) {
     const config: Partial<ThreatHuntConfig> = {
       patterns: body.patterns || undefined,
       maxCycles: body.maxCycles || 10,
-      cycleIntervalSeconds: body.cycleIntervalSeconds || 60,
+      cycleIntervalSeconds: body.cycleIntervalSeconds || 180,
       maxFindingsPerPattern: body.maxFindingsPerPattern || 5,
       minSeverityForInvestigation: body.minSeverityForInvestigation || 'medium',
       deduplicationWindowHours: body.deduplicationWindowHours || 24,
@@ -97,6 +97,7 @@ export async function POST(request: NextRequest) {
       modelUsed: body.modelUsed || undefined,
       timeRange: body.timeRange || undefined, // { earliest: "...", latest: "..." }
       focusAreas: body.focusAreas || undefined, // e.g., ["rootkit", "brute_force"]
+	cti: body.ctiContext || undefined,
     };
 
     // Get default AI provider if not specified

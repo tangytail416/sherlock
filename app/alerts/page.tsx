@@ -4,11 +4,12 @@ import { Button } from '@/components/ui/button';
 import { AlertsTable } from '@/components/alerts/alerts-table';
 import { prisma } from '@/lib/db';
 
-async function getAlerts() {
+async function getAlerts(take: number = 20, skip: number = 0) {
   try {
     const alerts = await prisma.alert.findMany({
       orderBy: { timestamp: 'desc' },
-      take: 100,
+      take,
+      skip,
       include: {
         investigations: {
           select: {
@@ -25,8 +26,25 @@ async function getAlerts() {
   }
 }
 
-export default async function AlertsPage() {
-  const alerts = await getAlerts();
+async function getTotalCount() {
+  try {
+    return await prisma.alert.count();
+  } catch (error) {
+    console.error('Error counting alerts:', error);
+    return 0;
+  }
+}
+
+export default async function AlertsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ limit?: string; offset?: string }>;
+}) {
+  const params = await searchParams;
+  const limit = parseInt(params.limit || '25');
+  const offset = parseInt(params.offset || '0');
+  const alerts = await getAlerts(limit, offset);
+  const totalCount = await getTotalCount();
 
   return (
     <div className="container mx-auto p-4 md:p-6">
@@ -46,7 +64,12 @@ export default async function AlertsPage() {
         </Button>
       </div>
 
-      <AlertsTable alerts={alerts} />
+      <AlertsTable 
+        alerts={alerts} 
+        totalCount={totalCount}
+        currentOffset={offset}
+        currentLimit={limit}
+      />
       </div>
     </div>
   );

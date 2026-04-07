@@ -3,6 +3,25 @@ import { NodeLabel, RelationshipType } from '@/lib/neo4j/schema';
 import { prisma } from '@/lib/db';
 
 /**
+ * Normalize entity value based on type
+ * Prevents duplicates from case/whitespace differences
+ */
+function normalizeEntityValue(type: NodeLabel, value: string): string {
+  const trimmed = value.trim();
+  
+  switch (type) {
+    case NodeLabel.Domain:
+      return trimmed.toLowerCase();
+    case NodeLabel.IPAddress:
+      return trimmed.toLowerCase();
+    case NodeLabel.User:
+      return trimmed.toLowerCase();
+    default:
+      return trimmed;
+  }
+}
+
+/**
  * Interface for an entity involved in a finding or relationship
  */
 export interface GraphEntity {
@@ -48,7 +67,7 @@ export async function addFindingToGraph(
         {
           findingId,
           originalId,
-          summary: summary.substring(0, 500), // Enforce limit
+          summary: summary.substring(0, 500),
           severity,
           source,
         }
@@ -56,6 +75,9 @@ export async function addFindingToGraph(
 
       // 2. Process Relationships
       for (const rel of relationships) {
+        const normalizedSourceValue = normalizeEntityValue(rel.source.type, rel.source.value);
+        const normalizedTargetValue = normalizeEntityValue(rel.target.type, rel.target.value);
+
         // Ensure Source Node exists
         await tx.run(
           `
@@ -65,7 +87,7 @@ export async function addFindingToGraph(
                         s.lastSeen = datetime()
           ON MATCH SET s.lastSeen = datetime()
           `,
-          { value: rel.source.value, type: rel.source.type }
+          { value: normalizedSourceValue, type: rel.source.type }
         );
 
         // Ensure Target Node exists
@@ -77,12 +99,10 @@ export async function addFindingToGraph(
                         t.lastSeen = datetime()
           ON MATCH SET t.lastSeen = datetime()
           `,
-          { value: rel.target.value, type: rel.target.type }
+          { value: normalizedTargetValue, type: rel.target.type }
         );
 
         // Create Entity-to-Entity Relationship
-        // Note: We use dynamic relationship types via APOC or string interpolation if safe.
-        // Since RelationshipType is an enum controlled by us, string interpolation is safe here.
         await tx.run(
           `
           MATCH (s:${rel.source.type} {value: $sourceValue})
@@ -92,8 +112,8 @@ export async function addFindingToGraph(
               r.description = $description
           `,
           {
-            sourceValue: rel.source.value,
-            targetValue: rel.target.value,
+            sourceValue: normalizedSourceValue,
+            targetValue: normalizedTargetValue,
             description: rel.description || '',
           }
         );
@@ -106,7 +126,7 @@ export async function addFindingToGraph(
           MATCH (e:${rel.source.type} {value: $value})
           MERGE (f)-[:${RelationshipType.IDENTIFIED}]->(e)
           `,
-          { findingId, value: rel.source.value }
+          { findingId, value: normalizedSourceValue }
         );
 
         // Link Finding -> Target Entity
@@ -116,12 +136,14 @@ export async function addFindingToGraph(
           MATCH (e:${rel.target.type} {value: $value})
           MERGE (f)-[:${RelationshipType.IDENTIFIED}]->(e)
           `,
-          { findingId, value: rel.target.value }
+          { findingId, value: normalizedTargetValue }
         );
       }
 
       // 4. Process Involved Entities (that might not have relationships yet)
       for (const entity of involvedEntities) {
+        const normalizedValue = normalizeEntityValue(entity.type, entity.value);
+        
         // Ensure Entity Node exists
         await tx.run(
           `
@@ -131,7 +153,7 @@ export async function addFindingToGraph(
                         e.lastSeen = datetime()
           ON MATCH SET e.lastSeen = datetime()
           `,
-          { value: entity.value, type: entity.type }
+          { value: normalizedValue, type: entity.type }
         );
 
         // Link Finding -> Entity
@@ -141,11 +163,11 @@ export async function addFindingToGraph(
           MATCH (e:${entity.type} {value: $value})
           MERGE (f)-[:${RelationshipType.IDENTIFIED}]->(e)
           `,
-          { findingId, value: entity.value }
+          { findingId, value: normalizedValue }
         );
       }
 
-      return { records: [], summary: {} as any }; // Return dummy QueryResult
+      return { records: [], summary: {} as any };
     });
 
     console.log(`Added finding ${findingId} to graph with ${relationships.length} relationships`);
@@ -250,10 +272,10 @@ export function extractEntities(text: string, data?: any): { type: NodeLabel; va
 
   function addEntity(type: NodeLabel, value: string) {
     if (!value || typeof value !== 'string') return;
-    const cleanValue = value.trim();
-    if (cleanValue && !seen.has(`${type}:${cleanValue}`)) {
-      entities.push({ type, value: cleanValue });
-      seen.add(`${type}:${cleanValue}`);
+    const normalizedValue = normalizeEntityValue(type, value);
+    if (normalizedValue && !seen.has(`${type}:${normalizedValue}`)) {
+      entities.push({ type, value: normalizedValue });
+      seen.add(`${type}:${normalizedValue}`);
     }
   }
 

@@ -24,11 +24,13 @@ import {
 import { Switch } from '@/components/ui/switch';
 import { useState } from 'react';
 import { Loader2 } from 'lucide-react';
+import { Checkbox } from '@/components/ui/checkbox'; // Checkbox is imported here
 
 const formSchema = z.object({
   name: z.string().min(1, 'Name is required'),
   providerType: z.enum(['glm', 'openai', 'azure', 'openrouter']),
-  apiKey: z.string().min(0, 'API key is required'),
+  // Updated so validation doesn't fail when the box is checked and field is empty
+  apiKey: z.string().optional().or(z.literal('')), 
   baseUrl: z.string().url('Must be a valid URL').optional().or(z.literal('')),
   modelName: z.string().min(1, 'Model name is required'),
   temperature: z.number().min(0).max(2),
@@ -69,6 +71,7 @@ const PROVIDER_DEFAULTS = {
 
 export function ProviderForm({ initialData, onSubmit, submitLabel = 'Save' }: ProviderFormProps) {
   const [isLoading, setIsLoading] = useState(false);
+  const [isApiKeyDisabled, setIsApiKeyDisabled] = useState(false); // Track checkbox state
 
   const form = useForm<FormValues>({
     resolver: zodResolver(formSchema),
@@ -79,7 +82,7 @@ export function ProviderForm({ initialData, onSubmit, submitLabel = 'Save' }: Pr
       baseUrl: initialData?.baseUrl || PROVIDER_DEFAULTS.glm.baseUrl,
       modelName: initialData?.modelName || PROVIDER_DEFAULTS.glm.modelName,
       temperature: typeof initialData?.temperature === 'number' ? initialData.temperature : 0.1,
-      maxTokens: typeof initialData?.maxTokens === 'number' ? initialData.maxTokens : 65536,
+      maxTokens: typeof initialData?.maxTokens === 'number' ? initialData.maxTokens : 4096,
       isDefault: initialData?.isDefault || false,
     },
   });
@@ -158,9 +161,36 @@ export function ProviderForm({ initialData, onSubmit, submitLabel = 'Save' }: Pr
           name="apiKey"
           render={({ field }) => (
             <FormItem>
-              <FormLabel>API Key</FormLabel>
+              {/* Flex container to place the label and checkbox on the same line */}
+              <div className="flex items-center justify-between">
+                <FormLabel>API Key</FormLabel>
+                <div className="flex items-center space-x-2">
+                  <Checkbox
+                    id="disable-api-key"
+                    checked={isApiKeyDisabled}
+                    onCheckedChange={(checked) => {
+                      setIsApiKeyDisabled(!!checked);
+                      if (checked) {
+                        form.setValue('apiKey', ''); // Optionally clear the field when disabled
+                        form.clearErrors('apiKey');
+                      }
+                    }}
+                  />
+                  <label
+                    htmlFor="disable-api-key"
+                    className="text-xs font-medium cursor-pointer text-muted-foreground hover:text-foreground"
+                  >
+                    This is an on-prmise provider
+                  </label>
+                </div>
+              </div>
               <FormControl>
-                <Input type="password" placeholder="sk-..." {...field} />
+                <Input 
+                  type="password" 
+                  placeholder="sk-..." 
+                  {...field} 
+                  disabled={isApiKeyDisabled} // Greys out the input when checked
+                />
               </FormControl>
               <FormDescription>Your API key for this provider</FormDescription>
               <FormMessage />
@@ -210,7 +240,8 @@ export function ProviderForm({ initialData, onSubmit, submitLabel = 'Save' }: Pr
               <FormItem>
                 <FormLabel>Temperature</FormLabel>
                 <FormControl>
-                  <Input type="number" step="0.1" min="0" max="2" {...field} />
+                  <Input type="number" step="0.1" min="0" max="2" {...field} 
+                  onChange={(e) => field.onChange(e.target.valueAsNumber)} />
                 </FormControl>
                 <FormDescription>0.0 - 2.0 (lower = more deterministic)</FormDescription>
                 <FormMessage />
@@ -225,8 +256,8 @@ export function ProviderForm({ initialData, onSubmit, submitLabel = 'Save' }: Pr
               <FormItem>
                 <FormLabel>Max Tokens</FormLabel>
                 <FormControl>
-                  <Input type="number" step="1" min="1" {...field} 
-				  onChange={(e) => field.onChange(e.target.valueAsNumber)} />
+                  <Input type="number" step="1" min="1" {...field}
+                  onChange={(e) => field.onChange(e.target.valueAsNumber)} />
                 </FormControl>
                 <FormDescription>Maximum response length</FormDescription>
                 <FormMessage />

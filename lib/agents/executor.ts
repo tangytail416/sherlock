@@ -45,11 +45,13 @@ export async function executeSplunkQueries(
         let earliestTime = '-1h';
         let latestTime = 'now';
 
-        // First, check if time_range is explicitly set (e.g., from threat hunt)
-        if (context.alertData?.time_range) {
-          earliestTime = context.alertData.time_range.earliest || '-1h';
-          latestTime = context.alertData.time_range.latest || 'now';
-          console.log('[Executor] Using time range from alert data (threat hunt)');
+        // First, check if this is a threat hunt or explicitly provided time range
+        if (context.alertData?.time_range || context.alertData?.is_threat_hunt) {
+          // Open the API window completely so the SPL string's internal earliest/latest can dictate the bounds.
+          // This prevents REST API crashes from unsupported date formats while fully respecting the agent's query.
+          earliestTime = '0';
+          latestTime = 'now';
+          console.log('[Executor] Using broad API time window (0 to now) to defer to SPL internal time bounds');
         }
         // Otherwise, create time window around alert timestamp
         else if (context.alertData?.timestamp) {
@@ -86,7 +88,7 @@ export async function executeSplunkQueries(
           const queryResults = await splunkClient.oneshot(searchQuery, {
             earliestTime,
             latestTime,
-            maxResults: 100,
+            maxResults: 250,
           });
 
           // Filter out whitelisted IOCs from results
@@ -312,7 +314,7 @@ Provide a detailed analysis based on your capabilities: {capabilities}
         splunkSection += 'No results found\n\n';
       } else {
         splunkSection += `Results (${results.length} entries):\n`;
-        splunkSection += JSON.stringify(results, null, 2) + '\n\n';
+        splunkSection += JSON.stringify(results) + '\n\n';
       }
     }
   } else {
@@ -338,7 +340,7 @@ Provide a detailed analysis based on your capabilities: {capabilities}
   const entitiesStr = entities.length > 0 ? entities.join(', ') : 'See alert data below';
 
   // Build context/details from alert
-  const alertContext = alertData.description || JSON.stringify(alertData.rawData || {}, null, 2);
+  const alertContext = alertData.description || JSON.stringify(alertData.rawData || {});
 
   // Format previous results properly - handle both objects and arrays
   let previousResultsStr = 'None';
@@ -346,7 +348,7 @@ Provide a detailed analysis based on your capabilities: {capabilities}
     previousResultsStr = '';
     for (const [agentName, result] of Object.entries(context.previousResults)) {
       previousResultsStr += `\n=== ${agentName.toUpperCase()} RESULTS ===\n`;
-      previousResultsStr += JSON.stringify(result, null, 2) + '\n';
+      previousResultsStr += JSON.stringify(result) + '\n';
     }
   }
 
@@ -371,7 +373,7 @@ Provide a detailed analysis based on your capabilities: {capabilities}
         }
       }
     }
-    allEventsStr = JSON.stringify(events, null, 2);
+    allEventsStr = JSON.stringify(events);
   }
 
   // Build IOCs list from previous results for case correlation
@@ -474,7 +476,7 @@ Provide a detailed analysis based on your capabilities: {capabilities}
 
   // Replace all template variables
   return template
-    .replace(/\{alert_data\}/g, JSON.stringify(alertData, null, 2))
+    .replace(/\{alert_data\}/g, JSON.stringify(alertData))
     .replace(/\{splunk_data\}/g, splunkSection)
     .replace(/\{previous_results\}/g, previousResultsStr)
     .replace(/\{capabilities\}/g, config.capabilities.join(', '))

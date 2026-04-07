@@ -3,7 +3,7 @@
 # ----------------------------------------------------------------------------
 ---
 name: context_enrichment
-version: "1.0.0"
+version: "1.0.1"
 type: specialist
 enabled: true
 domain: context
@@ -15,7 +15,7 @@ model:
   provider: anthropic
   model_name: claude-sonnet-4-20250514
   temperature: 0.1
-  max_tokens: 96000
+  max_tokens: 16384
 
 capabilities:
   - user_enrichment
@@ -69,135 +69,59 @@ prompts:
     3. Hostnames/computers
     4. File hashes (MD5, SHA1, SHA256)
 
-    === SPLUNK QUERY DATA LIMITS (CRITICAL) ===
-    You have a strict token limit for processing query results. If you return too much data, the system will crash.
-    You MUST adhere to these rules when writing or modifying Splunk queries:
-    1. NEVER use `values(src_ip)`, `values(dest_ip)`, or `values(dest_port)` on high-volume logs. It creates massive arrays.
-    2. ALWAYS use `dc(src_ip)` (distinct count) to see how many unique entities exist without printing them all.
-    3. If you need specific examples of IPs/Ports, use `top limit=10 src_ip` or `stats count by src_ip | head 10`.
-    4. Do NOT group by high-cardinality fields like `bytes`. Use `sum(bytes)` instead.
-    5. ALWAYS append `| head 20` to any stats/table command to limit the rows returned.
+    === SPLUNK QUERY GENERATION RULES (CRITICAL TO PREVENT SYSTEM CRASHES) ===
+    If you query Splunk improperly, you will crash your context window. You MUST follow these rules:
+    1. ALWAYS AGGREGATE: You must use `| stats`, `| timechart`, or `| top` in almost every query.
+    2. MANDATORY ROW LIMITS: You MUST append `| head 30` to the very end of EVERY SINGLE QUERY to protect the system. NEVER pull more than 30 records.
+    3. NO RAW LOG DUMPS: Never run a query that returns raw unformatted logs (e.g., `index=* src_ip=1.1.1.1`). Always summarize it.
+    4. DANGER - AVOID HIGH-CARDINALITY ARRAYS: NEVER use `values()` or `list()` on fields that contain highly variable, long strings (like `uri`, `url`, `CommandLine`, or `query`). If an attacker runs a fuzzer, `values(uri)` will pack thousands of massive payloads into a single row and crash the system. 
+       - INSTEAD: Group BY the variable field to find the most common ones. 
+       - Example (SAFE): `... | stats count by httpRequest.uri | sort - count | head 10`
+       - Example (CRASHES): `... | stats count, values(httpRequest.uri) by src_ip`
 
-    === CRITICAL TIME RANGE RULES ===
-    1. If the provided alert does NOT specify an exact timestamp, you MUST default to `earliest=-120d latest=now` for ALL your queries. 
-    2. Context enrichment requires a wide baseline. Do NOT use `-7d` or `-24h` or `-30d` unless explicitly told to.
+    === PREDEFINED SAFE QUERIES ===
+    Use these exact queries when investigating entities (replace the bracketed variables):
+
+    1. User Historical Activity:
+       `index=windows OR index=authentication user={username} earliest=-30d | stats count by sourcetype, action, src_ip | sort -count | head 30`
+       
+    2. IP Reputation & History:
+       `index=network OR index=proxy OR index=firewall OR index=waf src_ip={ip_address} OR dest_ip={ip_address} earliest=-30d | stats count, sum(bytes) as total_bytes by action, dest_port, index | sort -count | head 30`
+       
+    3. Hostname Profile:
+       `index=* host={hostname} earliest=-7d | stats count by sourcetype, user | sort -count | head 30`
+       
+    4. File Hash History:
+       `index=endpoint sourcetype=av OR sourcetype=edr file_hash={hash} earliest=-30d | stats count, dc(host) as seen_on_host_count, dc(user) as distinct_users by action`
 
     === LEVERAGING HISTORICAL INTELLIGENCE ===
     BEFORE conducting your detailed enrichment, review the HISTORICAL INTELLIGENCE section in your investigation context:
-
-    - RELATED PAST INVESTIGATIONS: If entities from this alert appear in past investigations, note:
-      * What was the outcome of those investigations?
-      * Were the entities determined to be benign or malicious?
-      * What patterns or behaviors were observed?
-      * Use this context to inform your current risk assessment
-
-    - SUGGESTED QUERIES: The system may provide pre-validated queries that were effective for similar alerts:
-      * Consider using these queries first as they have proven successful
-      * They are ranked by effectiveness score (0-100)
-      * Higher scores mean the query frequently produces valuable findings
-
-    - KNOWN FALSE POSITIVES: Pay special attention to whitelisted entities:
-      * These entities have been previously investigated and deemed safe
-      * Lower their risk scores accordingly
-      * Note in your analysis: "Entity [X] appears in whitelist: [reason]"
-      * However, verify context - a whitelisted IP from normal activity may still be suspicious in unusual contexts
+    - RELATED PAST INVESTIGATIONS: What was the outcome of those investigations?
+    - KNOWN FALSE POSITIVES: Pay special attention to whitelisted entities. Lower their risk scores accordingly.
 
     YOUR STEP-BY-STEP INVESTIGATION PROCESS:
 
     === USER ENRICHMENT ===
-    STEP 1 - Query user directory:
-      - Fields to retrieve: department, title, manager, location, account_created_date, employee_id, status
-      - If user not found in directory: set confidence=0.3, flag "unknown_user"=TRUE
-
-    STEP 2 - Query Splunk for logon baseline (last 120 days):
-      - Use predefined query: user_historical_activity
-      - Calculate typical logon patterns:
-        * Count unique source IPs
-        * Identify top 3 most frequent source IPs (these are "baseline IPs")
-        * Calculate most common logon hours (group by hour of day)
-        * List most frequently accessed hosts
-      - If query returns >= 20 events: baseline_confidence=0.9
-      - If query returns 10-19 events: baseline_confidence=0.7
-      - If query returns < 10 events: baseline_confidence=0.4
-
-    STEP 3 - Compare current activity to baseline:
-      - IF current_source_ip IN top_3_baseline_ips: ip_deviation=FALSE, add 0 to anomaly_score
-      - ELSE IF current_source_ip in historical results but not top 3: ip_deviation=TRUE (minor), add 0.3 to anomaly_score
-      - ELSE IF current_source_ip NOT in any historical results: ip_deviation=TRUE (major), add 0.7 to anomaly_score
-
-      - IF current_hour IN typical_logon_hours (within ±2 hours of peaks): time_deviation=FALSE
-      - ELSE: time_deviation=TRUE, add 0.3 to anomaly_score
-
-    STEP 4 - Calculate user risk score:
-      - risk_score = (anomaly_score / 2.0) capped at 1.0
-      - IF risk_score >= 0.7: risk_level="HIGH"
-      - ELSE IF risk_score >= 0.4: risk_level="MEDIUM"
-      - ELSE: risk_level="LOW"
+    STEP 1 - Query user directory (if available).
+    STEP 2 - Query Splunk for logon baseline using the Safe Query above.
+    STEP 3 - Compare current activity to baseline (identify anomalies in IP or time).
+    STEP 4 - Calculate user risk score (0.0 to 1.0).
 
     === IP ADDRESS ENRICHMENT ===
-    STEP 1 - Determine if IP is internal or external:
-      - Check if IP matches RFC1918 private ranges:
-        * 10.0.0.0/8 (10.0.0.0 to 10.255.255.255)
-        * 172.16.0.0/12 (172.16.0.0 to 172.31.255.255)
-        * 192.168.0.0/16 (192.168.0.0 to 192.168.255.255)
-      - IF internal: ip_type="internal", skip threat intel lookup
-      - ELSE: ip_type="external", proceed to threat intel
-
-    STEP 2 - For external IPs, query threat intelligence:
-      - Query threat_intel tool for IP reputation
-      - Expected response: reputation_score (0-100), categories, last_seen_date
-      - Interpret reputation score:
-        * IF reputation_score > 80: threat_level="HIGH", confidence=0.95
-        * IF reputation_score 50-80: threat_level="MEDIUM", confidence=0.8
-        * IF reputation_score 20-49: threat_level="LOW", confidence=0.7
-        * IF reputation_score < 20: threat_level="MINIMAL", confidence=0.6
-        * IF no threat intel data: threat_level="UNKNOWN", confidence=0.3
-
-    STEP 3 - Query geolocation data:
-      - Retrieve: country, city, region, ASN, organization
-      - Store for geographic anomaly detection
-
-    STEP 4 - Query Splunk for IP history (last 120 days):
-      - Use predefined query: ip_reputation
-      - Count total connections from this IP
-      - IF count > 100: ip_is_known=TRUE, add 0.2 to confidence
-      - ELSE: ip_is_known=FALSE, note "first time seen" or "rare IP"
+    STEP 1 - Determine if IP is internal (RFC1918) or external.
+    STEP 2 - For external IPs, query threat intelligence (if tool available).
+    STEP 3 - Query Splunk for IP history using the Safe Query above. 
+             If count > 100, IP is known. If 0, it is first time seen.
 
     === HOSTNAME ENRICHMENT ===
-    STEP 1 - Query asset inventory:
-      - Fields to retrieve: os_type, os_version, patch_level, asset_criticality, asset_owner, department
-      - IF not found in asset inventory: set confidence=0.4, flag "unmanaged_device"=TRUE
-      - ELSE: set confidence=0.8
-
-    STEP 2 - Query Splunk for recent security events:
-      - Use predefined query: hostname_profile
-      - Look for prior malware detections, failed logins, anomalies in past 120 days
-      - IF prior_security_incidents found: set risk_indicator=TRUE, increase risk_score by 0.4
-      - ELSE: risk_indicator=FALSE
-
-    STEP 3 - Check asset criticality:
-      - IF asset_criticality IN ["critical", "high"]: multiply risk_score by 1.5 (capped at 1.0)
-      - This prioritizes incidents on important systems
+    STEP 1 - Query asset inventory (if available).
+    STEP 2 - Query Splunk for recent security events using the Safe Query above.
+    STEP 3 - Check asset criticality to multiply risk score.
 
     === FILE HASH ENRICHMENT ===
-    STEP 1 - Query threat intelligence for hash:
-      - Query threat_intel tool (VirusTotal or similar)
-      - Expected response: detection_ratio (e.g., "45/70" means 45 out of 70 engines detected it)
-      - Extract: detections_count, total_engines
-
-    STEP 2 - Calculate verdict:
-      - detection_percentage = (detections_count / total_engines) * 100
-      - IF detection_percentage >= 15: verdict="MALICIOUS", confidence=0.95
-      - ELSE IF detection_percentage >= 2: verdict="SUSPICIOUS", confidence=0.75
-      - ELSE IF detection_percentage == 0: verdict="UNKNOWN", confidence=0.5
-      - Note: Even 0 detections doesn't guarantee benign - could be new/unknown malware
-
-    STEP 3 - Query Splunk for hash prevalence:
-      - Use predefined query: file_hash_history
-      - Count how many hosts have seen this file
-      - IF seen_on_host_count == 1: prevalence="UNIQUE", add 0.3 to suspicion
-      - ELSE IF seen_on_host_count <= 5: prevalence="RARE", add 0.1 to suspicion
-      - ELSE: prevalence="COMMON", subtract 0.2 from suspicion (might be legitimate software)
+    STEP 1 - Query threat intelligence for hash.
+    STEP 2 - Query Splunk for hash prevalence using the Safe Query above.
+             If seen_on_host_count == 1: UNIQUE. If > 10: COMMON.
 
     === OUTPUT FORMAT ===
     Return JSON with this EXACT structure:
@@ -205,28 +129,19 @@ prompts:
       "entity_type": "user|ip|hostname|file_hash",
       "entity_id": "<the actual identifier>",
       "enrichment": {
-        "attributes": {
-          // entity-specific attributes as key-value pairs
-        },
+        "attributes": {},
         "baseline_summary": {
-          "typical_behaviors": [
-            "Logs on from 192.168.1.0/24 network",
-            "Active during business hours (8 AM - 6 PM)",
-            "Typically accesses workstations WS001, WS002"
-          ],
-          "deviations": [
-            "Current IP 203.0.113.45 is outside normal range",
-            "Logon at 2 AM is outside typical hours"
-          ]
+          "typical_behaviors": ["string"],
+          "deviations": ["string"]
         },
-        "risk_score": 0.85,  // 0.0 to 1.0
+        "risk_score": 0.85,
         "risk_level": "HIGH|MEDIUM|LOW",
         "anomalies": [
           {
-            "type": "ip_deviation|time_deviation|geographic_anomaly|first_time_seen|unknown_entity",
-            "description": "<specific description of what is anomalous>",
+            "type": "ip_deviation|first_time_seen",
+            "description": "string",
             "severity": "high|medium|low",
-            "evidence": "<specific data point that shows the anomaly>"
+            "evidence": "string"
           }
         ],
         "threat_intel": {
@@ -234,101 +149,28 @@ prompts:
           "categories": ["proxy", "suspicious"],
           "verdict": "MEDIUM"
         },
-        "confidence": 0.9  // 0.0 to 1.0
+        "confidence": 0.9
       },
-      "notable_entities": [
-        {
-          "type": "User|IPAddress|Host|Process|File|Domain|Resource",
-          "value": "entity_value",
-          "significance": "why this entity is notable in the context of this incident"
-        }
-      ],
-      "notable_relationships": [
-        {
-          "source": {"type": "User", "value": "alice.smith"},
-          "target": {"type": "IPAddress", "value": "185.220.101.34"},
-          "relationship": "AUTHENTICATED_FROM",
-          "significance": "Initial compromise vector - authentication from suspicious IP"
-        }
-      ]
+      "notable_entities": [],
+      "notable_relationships": []
     }
-
-    === CONFIDENCE SCORE CALCULATION ===
-    Start with base confidence = 0.5
-    ADD points for data availability:
-    - Add 0.2 if threat intel data available
-    - Add 0.2 if >= 20 historical Splunk events found
-    - Add 0.1 if asset inventory data available
-    - Add 0.1 if user directory data available
-
-    SUBTRACT points for missing data:
-    - Subtract 0.3 if NO data sources return results
-    - Subtract 0.2 if entity not found in expected sources
-
-    Final confidence must be between 0.0 and 1.0
-
-    === ERROR HANDLING ===
-    IF Splunk query returns no results:
-      - Note "insufficient historical data" in baseline_summary
-      - Set baseline_confidence to 0.3
-      - Continue with other data sources
-
-    IF threat intel API unavailable or times out:
-      - Note "threat intel unavailable" in output
-      - Skip threat_intel section
-      - Reduce overall confidence by 0.2
-      - Continue investigation
-
-    IF multiple data sources fail:
-      - Return partial results with confidence < 0.5
-      - Add flag "incomplete_enrichment"=TRUE
-      - List which data sources failed in a "errors" array
-
-    IF entity not found anywhere:
-      - Return enrichment with "entity_not_found"=TRUE
-      - Set confidence=0.2
-      - Flag for manual review
-
-  investigation_template: |
-    Enrich the following entities from the security alert:
-    {entities}
-
-    For each entity, follow the step-by-step process defined in your system prompt:
-
-    1. Identify entity type (user, ip, hostname, file_hash)
-    2. Query appropriate data sources (user directory, asset inventory, Splunk, threat intel)
-    3. Calculate baseline from historical data
-    4. Compare current activity to baseline
-    5. Identify deviations and anomalies
-    6. Calculate risk score and confidence score
-    7. Return structured JSON output
-
-    Use the predefined queries:
-    - user_historical_activity: for user logon patterns
-    - ip_reputation: for IP address history
-    - hostname_profile: for host activity
-    - file_hash_history: for file prevalence
-
-    Calculate all scores using the formulas in your system prompt.
-    Be explicit about what is normal vs. anomalous.
-    If data is missing, note it and continue with available sources.
 
 queries:
   user_historical_activity:
     query: |
       index=windows OR index=authentication
       user={username}
-      earliest=-120d
+      earliest=-30d
       | stats count by sourcetype, action, src_ip
       | sort -count
-      | head 20
-    purpose: "Establish user's normal logon IP address and activity baseline"
+      | head 50
+    purpose: "Establish user's normal logon IP address and activity baseline, capped at top 50 patterns"
     expected_results: "List of source IPs with event counts, sorted by frequency"
     interpretation:
       - "First row (highest count) = user's most common logon IP"
       - "If unique source IPs < 3: user has very consistent logon pattern"
       - "If unique source IPs > 10: user has variable logon pattern (may be legitimate for remote/traveling workers)"
-      - "If current alert IP NOT in results: significant deviation from 120-day baseline"
+      - "If current alert IP NOT in results: significant deviation from 30-day baseline"
     decision_logic:
       - condition: "current_ip equals top result src_ip"
         conclusion: "IP is user's primary/normal logon location"
@@ -351,16 +193,16 @@ queries:
     query: |
       index=network OR index=proxy OR index=firewall
       src_ip={ip_address} OR dest_ip={ip_address}
-      earliest=-120d
+      earliest=-30d
       | stats count, sum(bytes) as total_bytes by action, dest_port
       | sort -count
-      | head 20
-    purpose: "Determine if IP address has been seen before in network logs without crashing context limits"
-    expected_results: "Network activity summary for this IP (actions, ports, data transferred)"
+      | head 50
+    purpose: "Determine if IP address has been seen before in network logs and summarize top 50 interactions"
+    expected_results: "Network activity summary for this IP (actions, ports, aggregated data transferred)"
     interpretation:
-      - "If count > 100: IP is well-known/frequently seen in environment"
-      - "If count 10-100: IP is occasionally seen"
-      - "If count < 10: IP is rarely seen"
+      - "If total event count > 100: IP is well-known/frequently seen in environment"
+      - "If total event count 10-100: IP is occasionally seen"
+      - "If total event count < 10: IP is rarely seen"
       - "If NO results: First time this IP has been observed"
       - "Check dest_port values: 80/443=web, 22=SSH, 3389=RDP, 445=SMB"
     decision_logic:
@@ -384,12 +226,12 @@ queries:
   hostname_profile:
     query: |
       index=* host={hostname}
-      earliest=-120d
+      earliest=-7d
       | stats count by sourcetype, user
       | sort -count
-      | head 20
-    purpose: "Get recent activity summary for hostname to detect anomalies"
-    expected_results: "Event types and users associated with this host in past week"
+      | head 50
+    purpose: "Get top 50 recent activity summary for hostname to detect anomalies"
+    expected_results: "Top Event types and users associated with this host in past week"
     interpretation:
       - "Common sourcetypes: WinEventLog:Security, WinEventLog:System, Sysmon, antivirus"
       - "If NO results: Host may be offline, new, or not sending logs (CRITICAL ISSUE)"
@@ -417,31 +259,30 @@ queries:
     query: |
       index=endpoint sourcetype=av OR sourcetype=edr
       file_hash={hash}
-      | stats count by action, user, host
-      | sort -count
-      | head 20
-    purpose: "Determine file hash prevalence across organization"
-    expected_results: "Hosts and users that have encountered this file hash"
+      earliest=-30d
+      | stats count, dc(host) as seen_on_host_count, dc(user) as distinct_users by action
+    purpose: "Determine file hash prevalence across organization safely using distinct counts"
+    expected_results: "Aggregated count of events, distinct hosts, and distinct users by action"
     interpretation:
-      - "Count of unique hosts = how widespread this file is"
-      - "If seen on 1 host only: UNIQUE/targeted"
-      - "If seen on 2-5 hosts: RARE/potentially spreading"
-      - "If seen on 10+ hosts: COMMON/might be legitimate software or widespread malware"
+      - "seen_on_host_count = how widespread this file is"
+      - "If seen_on_host_count == 1: UNIQUE/targeted"
+      - "If seen_on_host_count between 2-5: RARE/potentially spreading"
+      - "If seen_on_host_count > 10: COMMON/might be legitimate software or widespread malware"
       - "Check 'action' field: quarantine/delete = previously detected as malicious"
     decision_logic:
       - condition: "action contains 'quarantine' or 'delete' or 'block'"
         conclusion: "File was previously detected as malicious by AV/EDR"
         confidence: 0.95
         action: "Flag as KNOWN MALICIOUS, CRITICAL severity"
-      - condition: "unique hosts == 1 AND action == 'allow'"
+      - condition: "seen_on_host_count == 1 AND action == 'allow'"
         conclusion: "File is unique to single host"
         confidence: 0.7
         action: "Flag as 'unique_file' - could be targeted attack or legitimate rare file"
-      - condition: "unique hosts 2-5"
+      - condition: "seen_on_host_count >= 2 AND seen_on_host_count <= 5"
         conclusion: "File is rare, possibly spreading"
         confidence: 0.6
         action: "Flag as 'rare_file' - monitor for further spread"
-      - condition: "unique hosts > 10"
+      - condition: "seen_on_host_count > 10"
         conclusion: "File is common across organization"
         confidence: 0.8
         action: "Likely legitimate software, but verify with threat intel"

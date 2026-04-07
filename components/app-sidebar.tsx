@@ -7,7 +7,6 @@ import {
   AlertTriangle,
   Search,
   FileText,
-  Settings,
   LayoutDashboard,
   Moon,
   Sun,
@@ -16,7 +15,9 @@ import {
   ShieldCheck,
   Target,
   BookOpen,
-  Warehouse
+  Warehouse,
+  Tags,
+  Bot,
 } from 'lucide-react';
 import { useTheme } from 'next-themes';
 import {
@@ -32,7 +33,6 @@ import {
   SidebarRail,
   SidebarTrigger,
 } from '@/components/ui/sidebar';
-import { Button } from '@/components/ui/button';
 
 const navItems = [
   {
@@ -87,6 +87,16 @@ const settingsItems = [
     title: 'IOC Whitelist',
     href: '/settings/ioc-whitelist',
     icon: ShieldCheck,
+  },
+  {
+    title: 'Tags',
+    href: '/settings/tags',
+    icon: Tags,
+  },
+  {
+    title: 'Agents',
+    href: '/settings/agents',
+    icon: Bot,
   },
 ];
 

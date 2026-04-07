@@ -30,9 +30,15 @@ export async function GET(
       );
     }
 
+    const content = report.content as any;
+    const isAggregated = report.investigationId === null;
+
     // Transform data structure to match frontend expectations
     const transformedReport = {
       ...report,
+      isAggregated,
+      aggregatedFrom: isAggregated ? content?.aggregatedFrom : undefined,
+      aggregatedAt: isAggregated ? content?.aggregatedAt : undefined,
       findings: report.content, // Map content to findings for backward compatibility
       recommendations: report.recommendations
         ? typeof report.recommendations === 'string'

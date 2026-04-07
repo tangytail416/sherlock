@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Pause } from 'lucide-react';
+import { Square } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import {
@@ -122,15 +122,15 @@ export function StopInvestigationButton({
     <AlertDialog open={isOpen} onOpenChange={setIsOpen}>
       <AlertDialogTrigger asChild>
         <Button variant="destructive" disabled={isStopping}>
-          <Pause className="h-4 w-4 mr-2" />
-          Pause Investigation
+          <Square className="h-4 w-4 mr-2" />
+          Stop Investigation
         </Button>
       </AlertDialogTrigger>
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>Pause Investigation?</AlertDialogTitle>
+          <AlertDialogTitle>Stop Investigation?</AlertDialogTitle>
           <AlertDialogDescription>
-            This will immediately pause the investigation and mark any running agents as stopped.
+            This will immediately stop the investigation and mark any running agents as stopped.
             The investigation state will be preserved and you can:
           </AlertDialogDescription>
         </AlertDialogHeader>

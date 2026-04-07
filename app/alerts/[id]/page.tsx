@@ -1,6 +1,6 @@
 import { notFound } from 'next/navigation';
 import Link from 'next/link';
-import { ArrowLeft, Play } from 'lucide-react';
+import { ArrowLeft } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import { prisma } from '@/lib/db';
 import { Button } from '@/components/ui/button';
@@ -8,7 +8,11 @@ import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
 import { StartInvestigationButton } from '@/components/alerts/start-investigation-button';
+import { EditAlertButton } from '@/components/alerts/edit-alert-button';
+import { DeleteAlertButton } from '@/components/alerts/delete-alert-button';
 import { PageLayout } from '@/components/layout/page-layout';
+import { DEFAULT_COLORS } from '@/lib/constants/colors';
+import { cn } from '@/lib/utils';
 
 async function getAlert(id: string) {
   const alert = await prisma.alert.findUnique({
@@ -35,19 +39,15 @@ async function getAlert(id: string) {
   return alert;
 }
 
-const severityColors = {
-  critical: 'destructive',
-  high: 'destructive',
-  medium: 'default',
-  low: 'secondary',
-} as const;
+function getSeverityClasses(severity: string): string {
+  const style = DEFAULT_COLORS.severity[severity.toLowerCase()] || DEFAULT_COLORS.severity.medium;
+  return cn(style.bg, style.text, style.border);
+}
 
-const statusColors = {
-  new: 'default',
-  investigating: 'default',
-  resolved: 'secondary',
-  dismissed: 'secondary',
-} as const;
+function getStatusClasses(status: string): string {
+  const style = DEFAULT_COLORS.alertStatus[status.toLowerCase()] || DEFAULT_COLORS.alertStatus.new;
+  return cn(style.bg, style.text, style.border);
+}
 
 export default async function AlertDetailPage({
   params,
@@ -73,7 +73,19 @@ export default async function AlertDetailPage({
           </p>
         </div>
       </div>
-      <StartInvestigationButton alertId={alert.id} />
+      <div className="flex gap-2">
+        {!['resolved','dismissed'].includes(alert.status)&& <StartInvestigationButton alertId={alert.id} />}
+        <EditAlertButton 
+          alert={{
+            id: alert.id,
+            title: alert.title,
+            description: alert.description,
+            severity: alert.severity,
+            status: alert.status,
+          }}
+        />
+        {alert.status==='dismissed'&&(<DeleteAlertButton alertId={alert.id} alertTitle={alert.title} />)}
+      </div>
     </div>
   );
 
@@ -88,19 +100,19 @@ export default async function AlertDetailPage({
             <CardTitle>Alert Information</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="flex items-center justify-between">
-              <span className="text-sm font-medium">Severity</span>
-              <Badge variant={severityColors[alert.severity as keyof typeof severityColors]}>
-                {alert.severity}
-              </Badge>
-            </div>
-            <Separator />
-            <div className="flex items-center justify-between">
-              <span className="text-sm font-medium">Status</span>
-              <Badge variant={statusColors[alert.status as keyof typeof statusColors]}>
-                {alert.status}
-              </Badge>
-            </div>
+             <div className="flex items-center justify-between">
+               <span className="text-sm font-medium">Severity</span>
+               <Badge variant="outline" className={cn("border", getSeverityClasses(alert.severity))}>
+                 {alert.severity}
+               </Badge>
+             </div>
+             <Separator />
+             <div className="flex items-center justify-between">
+               <span className="text-sm font-medium">Status</span>
+               <Badge variant="outline" className={cn("border capitalize", getStatusClasses(alert.status))}>
+                 {alert.status}
+               </Badge>
+             </div>
             <Separator />
             <div className="flex items-center justify-between">
               <span className="text-sm font-medium">Source</span>
@@ -122,7 +134,7 @@ export default async function AlertDetailPage({
             <CardTitle>Investigations</CardTitle>
             <CardDescription>
               {alert.investigations.length > 0
-                ? `${alert.investigations.length} inve67stigation${alert.investigations.length > 1 ? 's' : ''}`
+                ? `${alert.investigations.length} investigation${alert.investigations.length > 1 ? 's' : ''}`
                 : 'No investigations yet'}
             </CardDescription>
           </CardHeader>
@@ -132,6 +144,7 @@ export default async function AlertDetailPage({
                 <p className="text-sm text-muted-foreground mb-4">
                   No investigations have been started for this alert
                 </p>
+                <StartInvestigationButton alertId={alert.id} />
               </div>
             ) : (
               <div className="space-y-4">

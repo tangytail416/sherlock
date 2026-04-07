@@ -4,8 +4,10 @@ import { z } from 'zod';
 
 const updateProviderSchema = z.object({
   name: z.string().min(1).optional(),
+  // FIX 1: Removed .min(1) so empty strings ("") are accepted
   apiKey: z.string().optional(),
-  baseUrl: z.string().url().optional().nullable(),
+  // Also allowing empty strings for baseUrl to match your frontend logic
+  baseUrl: z.string().url().optional().nullable().or(z.literal('')),
   modelName: z.string().min(1).optional(),
   temperature: z.number().min(0).max(2).optional(),
   maxTokens: z.number().int().positive().optional(),
@@ -92,12 +94,12 @@ export async function PATCH(
       isActive: validated.isActive,
     };
 
-    // If apiKey, temperature, or maxTokens are provided, update the config JSON
-    if (validated.apiKey || validated.temperature !== undefined || validated.maxTokens !== undefined) {
+    // FIX 2: Use !== undefined so empty strings ("") are actively saved and overwrite old keys
+    if (validated.apiKey !== undefined || validated.temperature !== undefined || validated.maxTokens !== undefined) {
       const existingConfig = (existing.config as any) || {};
       updateData.config = {
         ...existingConfig,
-        ...(validated.apiKey && { apiKey: validated.apiKey }),
+        ...(validated.apiKey !== undefined && { apiKey: validated.apiKey }),
         ...(validated.temperature !== undefined && { temperature: validated.temperature }),
         ...(validated.maxTokens !== undefined && { maxTokens: validated.maxTokens }),
       };
@@ -121,7 +123,7 @@ export async function PATCH(
   } catch (error) {
     if (error instanceof z.ZodError) {
       return NextResponse.json(
-        { error: 'Validation error 67676767676767', details: error.issues },
+        { error: 'Validation error', details: error.issues },
         { status: 400 }
       );
     }

@@ -5,10 +5,8 @@ import { z } from 'zod';
 const createProviderSchema = z.object({
   name: z.string().min(1),
   providerType: z.enum(['glm', 'openai', 'azure', 'openrouter']),
-  // FIX 1: Make apiKey optional so validation passes if it's missing or undefined
-  apiKey: z.string().optional(), 
-  // Improvement: Allow empty string for baseUrl if the frontend sends it as ""
-  baseUrl: z.string().url().optional().or(z.literal('')), 
+  apiKey: z.string().min(1),
+  baseUrl: z.string().url().optional(),
   modelName: z.string().min(1),
   temperature: z.number().min(0).max(2).optional(),
   maxTokens: z.number().int().positive().optional(),
@@ -61,14 +59,11 @@ export async function POST(request: NextRequest) {
       data: {
         name: validated.name,
         type: validated.providerType,
-        // Handle empty string or undefined for baseUrl
-        baseUrl: validated.baseUrl || null, 
+        baseUrl: validated.baseUrl,
         modelName: validated.modelName,
         isDefault: validated.isDefault ?? false,
         config: {
-          // FIX 2: Use validated.apiKey and default to empty string.
-          // (The previous code referenced 'apiKey' which was undefined)
-          apiKey: validated.apiKey || "", 
+          apiKey: validated.apiKey,
           temperature: validated.temperature ?? 0.1,
           maxTokens: validated.maxTokens ?? 4096,
         },
@@ -88,7 +83,7 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     if (error instanceof z.ZodError) {
       return NextResponse.json(
-        { error: 'Validation error 676767676767676767', details: error.issues },
+        { error: 'Validation error', details: error.issues },
         { status: 400 }
       );
     }

@@ -13,9 +13,12 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Textarea } from '@/components/ui/textarea';
 import { toast } from 'sonner';
-import { SavedQuerySelector } from './saved-query-selector';
-
+const Cycles = {
+  min: 1,
+  max: 20,
+};
 // Predefined focus areas
 const FOCUS_AREAS = [
   { id: 'rootkit', label: 'Rootkit Detection', description: 'Hidden malware and persistence' },
@@ -27,6 +30,7 @@ const FOCUS_AREAS = [
   { id: 'command_control', label: 'Command & Control', description: 'C2 communications' },
   { id: 'malware', label: 'Malware Execution', description: 'Malicious code detection' },
   { id: 'insider_threat', label: 'Insider Threats', description: 'Internal abuse patterns' },
+  { id: 'prompt_injection', label: 'Prompt Injections', description: 'Malicious LLM prompting' },
   { id: 'supply_chain', label: 'Supply Chain', description: 'Third-party compromises' },
 ];
 
@@ -37,7 +41,7 @@ interface ThreatHuntFormProps {
 export function ThreatHuntForm({ onSuccess }: ThreatHuntFormProps) {
   const [loading, setLoading] = useState(false);
   const [selectedFocusAreas, setSelectedFocusAreas] = useState<string[]>([]);
-  const [selectedQueryIds, setSelectedQueryIds] = useState<string[]>([]);
+  const [ctiContext, setCtiContext] = useState('');
   const [timeRangePreset, setTimeRangePreset] = useState('last_7d');
   const [minSeverity, setMinSeverity] = useState('medium');
   const [autoCreate, setAutoCreate] = useState(true);
@@ -47,6 +51,8 @@ export function ThreatHuntForm({ onSuccess }: ThreatHuntFormProps) {
       maxCycles: 3,
       customEarliest: '',
       customLatest: '',
+      customEarliestDate: '',
+      customLatestDate: '',
     },
   });
 
@@ -77,7 +83,27 @@ export function ThreatHuntForm({ onSuccess }: ThreatHuntFormProps) {
       // Determine time range based on preset or custom values
       let timeRange = undefined;
       if (timeRangePreset === 'custom') {
-        if (data.customEarliest || data.customLatest) {
+        // Handle datetime inputs if provided
+        if (data.customEarliestDate || data.customLatestDate) {
+          const formatDateTime = (dateStr: string) => {
+            if (!dateStr) return null;
+            const date = new Date(dateStr);
+            // Format as MM/DD/YYYY:HH:MM:SS for Splunk
+            const month = String(date.getMonth() + 1).padStart(2, '0');
+            const day = String(date.getDate()).padStart(2, '0');
+            const year = date.getFullYear();
+            const hours = String(date.getHours()).padStart(2, '0');
+            const minutes = String(date.getMinutes()).padStart(2, '0');
+            const seconds = String(date.getSeconds()).padStart(2, '0');
+            return `${month}/${day}/${year}:${hours}:${minutes}:${seconds}`;
+          };
+
+          timeRange = {
+            earliest: data.customEarliestDate ? formatDateTime(data.customEarliestDate) : data.customEarliest || '0',
+            latest: data.customLatestDate ? formatDateTime(data.customLatestDate) : data.customLatest || 'now',
+          };
+        } else if (data.customEarliest || data.customLatest) {
+          // Fallback to relative time strings
           timeRange = {
             earliest: data.customEarliest || '0',
             latest: data.customLatest || 'now',
@@ -90,6 +116,7 @@ export function ThreatHuntForm({ onSuccess }: ThreatHuntFormProps) {
           last_7d: { earliest: '-7d', latest: 'now' },
           last_30d: { earliest: '-30d', latest: 'now' },
           last_90d: { earliest: '-90d', latest: 'now' },
+		  last_ytd: { earliest: `01/01/${new Date().getFullYear()}:00:00:00`, latest: 'now'},
         };
         timeRange = presets[timeRangePreset];
       }
@@ -101,7 +128,7 @@ export function ThreatHuntForm({ onSuccess }: ThreatHuntFormProps) {
         autoStartInvestigations: autoStart,
         timeRange,
         focusAreas: selectedFocusAreas.length > 0 ? selectedFocusAreas : undefined,
-        savedQueryIds: selectedQueryIds.length > 0 ? selectedQueryIds : undefined,
+        ctiContext: ctiContext.trim() || undefined,
       };
 
       const res = await fetch('/api/threat-hunts', {
@@ -139,28 +166,50 @@ export function ThreatHuntForm({ onSuccess }: ThreatHuntFormProps) {
             <SelectItem value="last_7d">Last 7 Days</SelectItem>
             <SelectItem value="last_30d">Last 30 Days</SelectItem>
             <SelectItem value="last_90d">Last 90 Days</SelectItem>
+			<SelectItem value="last_ytd">Year-To-Date</SelectItem>
             <SelectItem value="all_time">All Time</SelectItem>
             <SelectItem value="custom">Custom</SelectItem>
           </SelectContent>
         </Select>
 
         {timeRangePreset === 'custom' && (
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <Label className="text-xs text-muted-foreground">Earliest (e.g., -30d, 0)</Label>
-              <Input
-                {...register('customEarliest')}
-                placeholder="-30d"
-                className="font-mono text-sm"
-              />
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label className="text-xs text-muted-foreground">Earliest (Date/Time)</Label>
+                <Input
+                  {...register('customEarliestDate')}
+                  type="datetime-local"
+                  className="text-sm"
+                />
+              </div>
+              <div>
+                <Label className="text-xs text-muted-foreground">Latest (Date/Time)</Label>
+                <Input
+                  {...register('customLatestDate')}
+                  type="datetime-local"
+                  className="text-sm"
+                />
+              </div>
             </div>
-            <div>
-              <Label className="text-xs text-muted-foreground">Latest (e.g., now, @d)</Label>
-              <Input
-                {...register('customLatest')}
-                placeholder="now"
-                className="font-mono text-sm"
-              />
+            <div className="text-center text-xs text-muted-foreground">OR</div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label className="text-xs text-muted-foreground">Earliest (Relative, e.g., -30d, 0)</Label>
+                <Input
+                  {...register('customEarliest')}
+                  placeholder="-30d"
+                  className="font-mono text-sm"
+                />
+              </div>
+              <div>
+                <Label className="text-xs text-muted-foreground">Latest (Relative, e.g., now, @d)</Label>
+                <Input
+                  {...register('customLatest')}
+                  placeholder="now"
+                  className="font-mono text-sm"
+                />
+              </div>
             </div>
           </div>
         )}
@@ -208,29 +257,36 @@ export function ThreatHuntForm({ onSuccess }: ThreatHuntFormProps) {
         )}
       </div>
 
-      {/* Saved Queries */}
+      {/* Cyber Threat Intelligence */}
       <div className="space-y-3">
         <div>
-          <Label>Saved Queries (Optional)</Label>
+          <Label htmlFor="ctiContext">Cyber Threat Intelligence (Optional)</Label>
           <p className="text-xs text-muted-foreground mt-1">
-            Select specific queries from your library to run alongside AI-generated queries.
-            Leave empty to rely solely on autonomous query generation.
+            Provide CTI context, IOCs, TTPs, or threat actor information to guide the threat hunt.
+            The AI agent will prioritize hunting for these specific threats.
           </p>
         </div>
-        <SavedQuerySelector
-          selectedQueryIds={selectedQueryIds}
-          onSelectionChange={setSelectedQueryIds}
-        />
-        {selectedQueryIds.length > 0 && (
+        <Textarea
+  id="ctiContext"
+  value={ctiContext}
+  onChange={(e) => setCtiContext(e.target.value)}
+  placeholder={`Example:
+- Known APT29 TTPs: Living-off-the-land binaries, PowerShell obfuscation
+- IOCs: 192.0.2.1, virus.evil.com, c3ab8ff13720e8ad9047dd39466b3c89
+- Campaign: Operation XYZ targeting financial sector
+- Focus on AWS Lambda misuse and data exfiltration to S3`}
+  className="font-mono text-sm min-h-[200px]"
+/>
+        {ctiContext.trim() && (
           <div className="text-xs text-muted-foreground">
-            {selectedQueryIds.length} quer{selectedQueryIds.length > 1 ? 'ies' : 'y'} selected
+            {ctiContext.trim().length} characters of CTI context provided
           </div>
         )}
       </div>
 
       {/* Hunt Cycles */}
       <div className="space-y-3">
-        <Label htmlFor="maxCycles">Hunt Cycles</Label>
+        <Label htmlFor="maxCycles">Hunt Cycles (minimum {Cycles.min}, maximum {Cycles.max})</Label>
         <Input
           id="maxCycles"
           type="number"
@@ -281,9 +337,9 @@ export function ThreatHuntForm({ onSuccess }: ThreatHuntFormProps) {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="low">No minimum</SelectItem>
+                <SelectItem value="low">Low and above</SelectItem>
                 <SelectItem value="medium">Medium and above</SelectItem>
-                <SelectItem value="high">High and critical</SelectItem>
+                <SelectItem value="high">High and above</SelectItem>
                 <SelectItem value="critical">Critical only</SelectItem>
               </SelectContent>
             </Select>

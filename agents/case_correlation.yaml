@@ -15,7 +15,7 @@ model:
   provider: anthropic
   model_name: claude-sonnet-4-20250514
   temperature: 0.1
-  max_tokens: 4096
+  max_tokens: 16384
 
 capabilities:
   - ioc_correlation
@@ -247,6 +247,7 @@ prompts:
       - Cap between 0.0 and 1.0
 
     === OUTPUT FORMAT ===
+    Return a structured timeline such as the following:
     {
       "related_cases": [
         {
@@ -297,6 +298,11 @@ prompts:
         "Consider threat actor attribution analysis"
       ]
     }
+    
+    CRITICAL JSON RULES:
+    - NEVER add explanatory text to numeric or boolean fields. 
+    - (e.g., Use `"total_cases": 3` NOT `"total_cases": 3 (1 alert + 2 correlated)`). 
+    - If you must add text to a number, wrap the entire value in double quotes to make it a valid string.
 
     === SIMILARITY SCORE INTERPRETATION ===
     - >= 0.85: VERY HIGH - Almost certainly related, same campaign
@@ -331,6 +337,7 @@ queries:
     GROUP BY case_id
     HAVING match_count > 0
     ORDER BY match_count DESC
+    LIMIT 10
     
   ttp_correlation: |
     SELECT case_id, mitre_techniques
@@ -338,6 +345,7 @@ queries:
     WHERE status IN ('open', 'investigating')
     AND created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)
     AND case_id != {current_case_id}
+    LIMIT 20
 
 output_schema:
   type: json

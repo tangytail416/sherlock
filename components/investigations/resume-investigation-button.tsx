@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
-import { PlayCircle } from 'lucide-react';
+import { Play } from 'lucide-react';
 import { toast } from 'sonner';
 
 interface ResumeInvestigationButtonProps {
@@ -46,7 +46,7 @@ export function ResumeInvestigationButton({ investigationId }: ResumeInvestigati
 
   return (
     <Button onClick={handleResume} disabled={isResuming} variant="default">
-      <PlayCircle className="h-4 w-4 mr-2" />
+      <Play className="h-4 w-4 mr-2" />
       {isResuming ? 'Resuming...' : 'Resume Investigation'}
     </Button>
   );

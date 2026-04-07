@@ -2,6 +2,7 @@ import neo4j, { Driver, Session, Result, QueryResult } from 'neo4j-driver';
 import { prisma } from '@/lib/db';
 
 let driver: Driver | null = null;
+let schemaCheckLogged = false;
 
 export interface Neo4jConnectionConfig {
   uri: string;
@@ -57,12 +58,50 @@ export async function initializeNeo4jDriver(config?: Neo4jConnectionConfig): Pro
 }
 
 /**
+ * Check if Neo4j schema has been initialized
+ * Returns true if constraints/indexes exist or config says initialized
+ */
+export async function isSchemaReady(): Promise<boolean> {
+  try {
+    const config = await prisma.neo4jConfig.findFirst({
+      where: { isActive: true },
+    });
+
+    if (config?.schemaInitialized) {
+      return true;
+    }
+
+    const constraints = await executeCypher('SHOW CONSTRAINTS');
+    return constraints.length > 0;
+  } catch (error) {
+    return false;
+  }
+}
+
+/**
  * Get the active Neo4j driver instance, initializing if needed
  */
 export async function getNeo4jDriver(): Promise<Driver> {
   if (!driver) {
     await initializeNeo4jDriver();
   }
+  
+  if (!schemaCheckLogged) {
+    isSchemaReady().then((ready) => {
+      if (!ready) {
+        console.warn(
+          '\n' + '⚠️ '.repeat(35) +
+          '\n⚠️  Neo4j schema not initialized!' +
+          '\n⚠️  Run: npx ts-node scripts/init-neo4j-schema.ts' +
+          '\n⚠️  Or reset: npx ts-node scripts/reset-neo4j.ts --force' +
+          '\n⚠️  Data integrity issues may occur without proper constraints.' +
+          '\n' + '⚠️ '.repeat(35) + '\n'
+        );
+      }
+      schemaCheckLogged = true;
+    });
+  }
+  
   return driver!;
 }
 

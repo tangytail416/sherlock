@@ -15,7 +15,7 @@ model:
   provider: anthropic
   model_name: claude-sonnet-4-20250514
   temperature: 0.3
-  max_tokens: 8192
+  max_tokens: 16384
 
 capabilities:
   - executive_summary_generation
@@ -123,7 +123,7 @@ prompts:
     SECTION 5: Attack Timeline
       Content:
         - Chronological sequence of events
-        - Timestamps in human-readable format
+        - Timestamps in human-readable format with timezone (eg UTC, UTC +8.0)
         - Clear description of each event
         - Visual markers for critical events
 
@@ -131,20 +131,20 @@ prompts:
         ```markdown
         ## Attack Timeline
 
-        **Jan 15, 2024 14:22** - [INITIAL ACCESS] Phishing email received by user john.doe
+        **Jan 15, 2024 14:22 UTC +8.0** - [INITIAL ACCESS] Phishing email received by user john.doe
         - Email from: attacker@evil.com
         - Subject: "Urgent Invoice - Payment Required"
         - Attachment: invoice.exe (malware)
 
-        **Jan 15, 2024 14:25** - [!] [EXECUTION] User executed malicious attachment
+        **Jan 15, 2024 14:25 UTC +8.0** - [!] [EXECUTION] User executed malicious attachment
         - Process: invoice.exe spawned by outlook.exe
         - User action: Double-clicked attachment
 
-        **Jan 15, 2024 14:26** - [PERSISTENCE] Malware created persistence mechanism
+        **Jan 15, 2024 14:26 UTC +8.0** - [PERSISTENCE] Malware created persistence mechanism
         - Registry key: HKCU\Software\Microsoft\Windows\CurrentVersion\Run\WindowsUpdate
         - Ensures malware runs on system startup
 
-        **Jan 15, 2024 14:27** - [C2] Command & Control connection established
+        **Jan 15, 2024 14:27 UTC +8.0** - [C2] Command & Control connection established
         - Destination: 198.51.100.20:8080
         - Pattern: Beaconing every 60 seconds
         ```
@@ -388,7 +388,17 @@ prompts:
     Return report in Markdown format with clear sections, tables, and formatting.
     Use headers (##), bold (**text**), bullet lists, code blocks (```), and tables.
 
+    IMPORTANT: You MUST start the very beginning of your response with a metadata block containing the exact severity classification. Format it exactly like this:
+
+    ---
+    severity: FALSE POSITIVE
+    ---
+
+    # Executive Summary
+    ...rest of the report...
+
     === SEVERITY CLASSIFICATION ===
+    
     Determine overall incident severity:
 
     CRITICAL:
@@ -414,8 +424,12 @@ prompts:
     LOW:
       - Policy violation
       - Suspicious activity with low confidence
-      - False positive likely
       - No actual compromise
+      - All systems intact
+      
+    FALSE POSITIVE:
+      - No malicious activity actually occured
+      - Benign or legitimate activity flagged as suspicious
 
     === CONFIDENCE LANGUAGE ===
     Use consistent language for confidence levels:

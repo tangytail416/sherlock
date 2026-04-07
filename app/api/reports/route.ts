@@ -1,13 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 
-// GET /api/reports - List all reports
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
     const investigationId = searchParams.get('investigationId');
+    const folderId = searchParams.get('folderId');
 
-    const where = investigationId ? { investigationId } : {};
+    // @ts-ignore - Prisma client not regenerated yet
+    const where: any = {};
+    if (investigationId) where.investigationId = investigationId;
+    if (folderId) where.folders = { some: { folderId } };
 
     const reports = await prisma.report.findMany({
       where,
@@ -17,11 +20,40 @@ export async function GET(request: NextRequest) {
             alert: true,
           },
         },
+        folders: {
+          include: {
+            folder: {
+              select: {
+                id: true,
+                name: true,
+                color: true,
+                icon: true,
+              },
+            },
+          },
+        },
       },
       orderBy: { createdAt: 'desc' },
     });
 
-    return NextResponse.json({ reports });
+    const reportsWithFolders = reports.map((report: any) => {
+      const content = report.content as any;
+      const isAggregated = report.investigationId === null;
+      
+      return {
+        id: report.id,
+        title: report.title,
+        summary: report.summary,
+        createdAt: report.createdAt,
+        isAggregated,
+        investigation: report.investigation,
+        folders: report.folders.map((f: any) => f.folder),
+        aggregatedCount: isAggregated ? content?.aggregatedFrom?.length : undefined,
+        aggregatedSeverity: isAggregated ? content?.severity : undefined,
+      };
+    });
+
+    return NextResponse.json({ reports: reportsWithFolders });
   } catch (error) {
     console.error('Error fetching reports:', error);
     return NextResponse.json(

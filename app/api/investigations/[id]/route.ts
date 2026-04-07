@@ -2,9 +2,6 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { updateInvestigationSchema } from '@/lib/validations/investigation';
 
-// FIX: Force dynamic rendering to prevent caching stale data
-export const dynamic = 'force-dynamic';
-
 // GET /api/investigations/[id] - Get a single investigation
 export async function GET(
   request: NextRequest,
@@ -47,7 +44,6 @@ export async function GET(
   }
 }
 
-// ... (Rest of PATCH and DELETE handlers remain the same) ...
 // PATCH /api/investigations/[id] - Update an investigation
 export async function PATCH(
   request: NextRequest,

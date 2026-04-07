@@ -4,7 +4,7 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { formatDistanceToNow } from 'date-fns';
-import { Eye, Search as SearchIcon, Play, TrendingUp, Trash } from 'lucide-react';
+import { Eye, Search as SearchIcon, Play, TrendingUp, ChevronLeft, ChevronRight, List } from 'lucide-react';
 import {
   Table,
   TableBody,
@@ -43,6 +43,9 @@ type SavedQuery = {
 
 interface QueryLibraryTableProps {
   queries: SavedQuery[];
+  totalCount?: number;
+  currentOffset?: number;
+  currentLimit?: number;
   onExecute?: (queryId: string) => void;
 }
 
@@ -81,23 +84,17 @@ const categoryLabels = {
   other: 'Other',
 } as const;
 
-export function QueryLibraryTable({ queries, onExecute }: QueryLibraryTableProps) {
-  const router = useRouter();
+export function QueryLibraryTable({ 
+  queries, 
+  totalCount, 
+  currentOffset = 0, 
+  currentLimit = 10,
+  onExecute 
+}: QueryLibraryTableProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
   const [sourceFilter, setSourceFilter] = useState<string>('all');
-
-  const handleDelete = async (id: string) => {
-    //const confirmed = confirm('Are you sure you want to delete this query?');
-    //if (!confirmed) return;
-
-    try {
-      await fetch(`/api/queries/${id}`, { method: 'DELETE' }); 
-      router.refresh();
-    } catch (error) {
-      console.error('Error deleting query:', error);
-    }
-  };
+  const router = useRouter();
 
   const filteredQueries = queries.filter((query) => {
     const matchesSearch =
@@ -254,14 +251,6 @@ export function QueryLibraryTable({ queries, onExecute }: QueryLibraryTableProps
                           <Eye className="h-4 w-4" />
                         </Link>
                       </Button>
-                      <Button 
-                        variant="ghost" 
-                        size="sm" 
-                        onClick={() => handleDelete(query.id)}
-                        title="Delete query"
-                      >
-                        <Trash className="h-4 w-4 text-destructive hover:text-destructive" />
-                      </Button>
                     </div>
                   </TableCell>
                 </TableRow>
@@ -271,8 +260,63 @@ export function QueryLibraryTable({ queries, onExecute }: QueryLibraryTableProps
         </Table>
       </div>
 
-      <div className="text-sm text-muted-foreground">
-        Showing {filteredQueries.length} of {queries.length} queries
+      <div className="flex items-center justify-between">
+        <div className="text-sm text-muted-foreground">
+          Showing {filteredQueries.length} of {totalCount || queries.length} queries
+        </div>
+        {totalCount !== undefined && (
+          <div className="flex items-center gap-2 flex-wrap">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => router.push(`/queries?offset=${Math.max(0, currentOffset - currentLimit)}&limit=${currentLimit}`)}
+              disabled={currentOffset === 0}
+            >
+              <ChevronLeft className="h-4 w-4" />
+              Previous
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => router.push(`/queries?offset=${currentOffset + currentLimit}&limit=${currentLimit}`)}
+              disabled={currentOffset + currentLimit >= totalCount}
+            >
+              Next
+              <ChevronRight className="h-4 w-4" />
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => router.push(`/queries?offset=0&limit=${totalCount}`)}
+              disabled={currentOffset + currentLimit >= totalCount}
+            >
+              <List className="h-4 w-4 mr-2" />
+              Show All
+            </Button>
+            <div className="relative">
+              <Select 
+                value={(currentLimit >= (totalCount || 0)) ? 'all' : currentLimit.toString()} 
+                onValueChange={(value) => {
+                  if (value === 'all') {
+                    router.push(`/queries?offset=0&limit=${totalCount}`);
+                  } else {
+                    router.push(`/queries?offset=0&limit=${value}`);
+                  }
+                }}
+              >
+                <SelectTrigger className="w-[110px] h-8">
+                  <SelectValue placeholder="Limit" />
+                </SelectTrigger>
+                <SelectContent side="top">
+                  <SelectItem value="10">10 / page</SelectItem>
+                  <SelectItem value="25">25 / page</SelectItem>
+                  <SelectItem value="50">50 / page</SelectItem>
+                  <SelectItem value="all">All</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

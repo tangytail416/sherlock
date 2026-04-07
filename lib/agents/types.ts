@@ -31,6 +31,7 @@ export interface AgentConfig {
     system: string;
     investigation_template?: string;
     analysis_template?: string;
+    aggregation_template?: string;
   };
   queries?: Record<string, string>;
   output_schema?: {
@@ -193,9 +194,18 @@ export interface AffectedEntities {
 }
 
 /**
+ * Structured title components for alert title generation
+ */
+export interface TitleDetail {
+  primary_entity: string;
+  key_detail: string;
+}
+
+/**
  * Threat hunter agent output for a single finding
  */
 export interface ThreatFinding {
+  title_detail?: TitleDetail;
   finding_type: string;
   description: string;
   severity: 'critical' | 'high' | 'medium' | 'low';

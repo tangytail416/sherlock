@@ -20,7 +20,7 @@ model:
   provider: anthropic
   model_name: claude-sonnet-4-20250514
   temperature: 0.1
-  max_tokens: 65536
+  max_tokens: 16384
 
 capabilities:
   - cloudtrail_log_analysis
@@ -66,28 +66,24 @@ splunk_queries:
         index=cloudtrail eventName IN ("CreateUser", "CreateAccessKey", "AttachUserPolicy", "PutUserPolicy", "CreateRole", "AttachRolePolicy")
         | table _time, userIdentity.userName, eventName, sourceIPAddress, requestParameters
         | sort -_time
-        | head 20
 
     - name: "Detect CloudTrail tampering (anti-forensics)"
       spl: |
         index=cloudtrail eventName IN ("StopLogging", "DeleteTrail", "UpdateTrail")
         | table _time, userIdentity.userName, eventName, sourceIPAddress, errorCode
         | sort -_time
-        | head 20
 
     - name: "Find AWS Console logins"
       spl: |
         index=cloudtrail eventName=ConsoleLogin
         | stats count by userIdentity.userName, sourceIPAddress, responseElements.ConsoleLogin
         | sort -count
-        | head 20
 
     - name: "Detect root account usage"
       spl: |
         index=cloudtrail userIdentity.type=Root
         | table _time, eventName, sourceIPAddress, userAgent, errorCode
         | sort -_time
-        | head 20
 
     - name: "Find failed authentication attempts"
       spl: |
@@ -95,35 +91,30 @@ splunk_queries:
         | stats count by userIdentity.userName, sourceIPAddress, eventName
         | where count > 10
         | sort -count
-        | head 20
 
     - name: "Detect S3 bucket policy changes"
       spl: |
         index=cloudtrail eventName IN ("PutBucketPolicy", "PutBucketAcl", "DeleteBucketPolicy")
         | table _time, userIdentity.userName, requestParameters.bucketName, sourceIPAddress
         | sort -_time
-        | head 20
 
     - name: "Find security group modifications"
       spl: |
         index=cloudtrail eventName IN ("AuthorizeSecurityGroupIngress", "RevokeSecurityGroupIngress")
         | table _time, userIdentity.userName, requestParameters.groupId, requestParameters.ipPermissions
         | sort -_time
-        | head 20
 
     - name: "Detect snapshot exfiltration"
       spl: |
         index=cloudtrail eventName IN ("CreateSnapshot", "ModifySnapshotAttribute", "CopySnapshot")
         | table _time, userIdentity.userName, eventName, sourceIPAddress, requestParameters
         | sort -_time
-        | head 20
 
     - name: "Exclude whitelisted accounts from results"
       spl: |
         index=cloudtrail
         | search NOT [| inputlookup whitelist_accounts.csv | fields userName]
         | table _time, userIdentity.userName, eventName, sourceIPAddress
-        | head 20
 
   whitelisted_accounts:
     - alicia
@@ -159,18 +150,19 @@ prompts:
   system: |
     You are an AWS CloudTrail Investigation Specialist. Your role is to analyze AWS CloudTrail logs
     to identify security incidents, unauthorized access, privilege escalation, and malicious activity.
+    
+    === SPLUNK QUERY RULES (CRITICAL - PREVENT WIDE-ROW CRASHES) ===
+    CloudTrail logs and AWS Metadata contain massive nested JSON arrays that will instantly crash your context window if queried improperly. You MUST follow these rules:
+    1. NEVER use `values()` or `list()` in your queries. Use `dc()` (distinct count) instead.
+    2. BEWARE OF ARRAYS: NEVER put raw array fields like `Tags{}.Key`, `Tags{}.Value`, `requestParameters`, or `responseElements` directly into a `| table` command. They are too large.
+    3. ALWAYS AGGREGATE OR LIMIT: Use `| stats count by eventName, userIdentity.userName` to group data. 
+    4. ALWAYS append `| head 30` to the very end of every single query to limit the payload. NEVER pull more than 30 raw records.
 
-    === SPLUNK QUERY DATA LIMITS (CRITICAL) ===
-    You have a strict token limit for processing query results. If you return too much data, the system will crash.
-    You MUST adhere to these rules when writing or modifying Splunk queries:
-    1. NEVER use `values()` or `list()` on high-volume logs like IPs, ARNs, or User Agents. It creates massive arrays.
-    2. ALWAYS use `dc()` (distinct count) to see how many unique entities exist without printing them all.
-    3. If you need specific examples, use `top limit=10` or `stats count by X | head 10`.
-    4. ALWAYS append `| head 20` to any stats or table command to limit the rows returned. Do not output unbounded tables.
-
-    === CRITICAL TIME RANGE RULES ===
-    1. If the provided alert does NOT specify an exact timestamp, you MUST default to `earliest=-120d latest=now` for ALL your queries.
-    2. CloudTrail investigations often require a wide historical baseline to uncover slow-moving threats or persistent access. Do NOT use `-24h`, `-2h`, or `-7d` unless explicitly instructed to do so.
+    === DATA CONDENSATION RULES ===
+    When summarizing data for your final output:
+    1. ARRAY LIMITS: NEVER list more than 10 individual items in any array (e.g., in `indicators_of_compromise`, `timeline_analysis`).
+    2. AGGREGATE AND SUMMARIZE: If a user made 5,000 API calls, extract the pattern and summarize. Example: `["User alice made 5,000 DescribeInstances calls"]`.
+    3. CITE METRICS: Always rely on counts and summaries to convey scale rather than printing infinite lists.
 
     === YOUR EXPERTISE ===
     You are an expert in:

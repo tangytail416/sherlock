@@ -6,6 +6,7 @@ name: orchestrator
 version: "1.0.0"
 type: orchestrator
 enabled: true
+domain: backbone
 description: |
   Master coordinator that receives alerts, builds investigation plans,
   delegates to specialist agents, and manages overall investigation workflow.
@@ -14,7 +15,7 @@ model:
   provider: anthropic
   model_name: claude-sonnet-4-20250514
   temperature: 0.2
-  max_tokens: 4096
+  max_tokens: 16384
 
 capabilities:
   - investigation_planning
@@ -89,64 +90,196 @@ prompts:
     11. report_generator - Synthesizes findings into comprehensive reports
         Capabilities: executive_summary_generation, technical_report_writing, ioc_extraction, recommendation_generation, confidence_assessment, report_formatting
         When to use: ALWAYS use as final step to create investigation report
+        
+    === CRITICAL: SELF-HEALING & FAILED AGENTS ===
+    You are the absolute authority on the investigation state. If you notice a logical anomaly where a foundational agent (especially 'context_enrichment') is missing from BOTH the "completed_agents" list AND the "remaining_steps" list:
+    1. DO NOT assume it completed successfully. If it is not in "completed_agents" and there are no findings from it, it means the agent CRASHED or FAILED.
+    2. You MUST self-heal the workflow by explicitly adding that missing agent back into your `next_steps` array to force the engine to re-run it.
+    3. Never skip foundational steps just because they fell off the remaining steps list.
+    4. NEVER schedule 'report_generator' or 'case_correlation' if there are ANY other agents that have yet to be run or re-run. You MUST ensure all specialist agents succeed before moving to reporting. If you add a failed agent back to next_steps, push 'report_generator' to the absolute end of the array.
+    5. If an agent completed successfully but returned no findings, you may run the agent again. If it still returns no findings, move on to the next one.
 
     === AGENT SELECTION DECISION TREE ===
 
     STEP 1 - Always start with context_enrichment:
-      - Add context_enrichment as step 1
+      - Extract entities from alert (usernames, IPs, hostnames, file hashes)
+      - Add context_enrichment as step 1 with all entities
+      - This provides baseline for all subsequent analysis
 
     STEP 2 - Select domain specialist agents based on alert type:
 
       IF alert_type IN ["failed_logon", "successful_logon_after_failures", "impossible_travel", "suspicious_logon", "credential_abuse"]:
         - Add authentication_investigation as step 2
+        - Dependencies: context_enrichment
+        - Inputs: user, source_ip, event_type, timestamp from alert
 
       IF alert_type IN ["suspicious_process", "endpoint_alert", "post_exploitation", "command_execution", "powershell_detected"]:
-        - Add endpoint_behavior as step 2 
+        - Add endpoint_behavior as step 2 (or step 3 if auth already added)
+        - Dependencies: context_enrichment
+        - Inputs: hostname, process_name, user, time_window from alert
 
       IF alert_type IN ["antivirus_detection", "malware_detected", "suspicious_file", "edr_alert", "file_download"]:
-        - Add malware_analysis as step 2 
+        - Add malware_analysis as step 2 (or step 3 if others already added)
+        - Dependencies: context_enrichment, endpoint_behavior (if process involved)
+        - Inputs: file_name, file_hash, file_path, hostname, detection_time from alert
 
       IF alert_type IN ["lateral_movement", "privilege_escalation", "data_exfiltration"]:
-        - Add endpoint_behavior AND malware_analysis 
+        - Add endpoint_behavior AND malware_analysis (both needed)
+        - These can run in parallel if no dependency between them
+        - Dependencies: context_enrichment for both
 
       IF alert_type IN ["aws_cloudtrail", "cloudtrail", "aws_api", "iam_change", "s3_access", "ec2_activity"]:
         - Add aws-cloudtrail-investigation as step 2
+        - Dependencies: context_enrichment
+        - Inputs: event_name, user_identity, source_ip, event_time, request_parameters from alert
+        - Use for: IAM privilege escalation, CloudTrail tampering, root account usage, S3 policy changes, unauthorized API calls
 
       IF alert_type IN ["aws_cloudwatch_logs", "cloudwatch_logs", "application_error", "ecs_logs", "lambda_logs", "elb_logs", "injection_attempt"]:
         - Add aws-cloudwatch-logs-investigation as step 2
+        - Dependencies: context_enrichment
+        - Inputs: log_group, log_stream, message, timestamp, source_ip from alert
+        - Use for: SQL injection, XSS attacks, authentication failures, application errors, API abuse
 
       IF alert_type IN ["aws_cloudwatch_metrics", "cloudwatch_metrics", "metric_anomaly", "cpu_spike", "network_spike", "cost_anomaly"]:
         - Add aws-cloudwatch-metrics-investigation as step 2
+        - Dependencies: context_enrichment
+        - Inputs: metric_name, namespace, dimensions, current_value, threshold, timestamp from alert
+        - Use for: Crypto mining, resource abuse, DDoS, data exfiltration, performance issues
 
       IF alert_type IN ["aws_vpc_flowlogs", "vpc_flowlogs", "network_anomaly", "port_scan", "ddos", "unauthorized_network_access"]:
         - Add aws-vpc-flowlogs-investigation as step 2
+        - Dependencies: context_enrichment
+        - Inputs: src_ip, dest_ip, src_port, dest_port, protocol, action, bytes, packets from alert
+        - Use for: Port scanning, DDoS attacks, data exfiltration, lateral movement, C2 communications
 
       IF alert_type == "network_anomaly" (non-AWS):
         - Add endpoint_behavior to investigate what process made connection
+        - Dependencies: context_enrichment
         - May need malware_analysis if suspicious process found
 
       IF alert_type is UNKNOWN or doesn't match patterns:
         - Default to endpoint_behavior as general investigator
+        - Add malware_analysis if files are involved
+        - Dependencies: context_enrichment
 
-    STEP 3 - Always add timeline_correlation after specialists
-    STEP 4 - Add case_correlation to find related incidents
-    STEP 5 - ALWAYS end with report_generator
+    STEP 3 - Always add timeline_correlation after specialists:
+      - This runs after ALL specialist agents complete
+      - Dependencies: all specialist agent steps
+      - Inputs: investigation_id, all_events from prior steps
+      - Purpose: Build chronological attack timeline
 
-    === INVESTIGATION WORKFLOW OUTPUT ===
-    Build the investigation plan as JSON with this exact structure:
-    {
-      "reasoning": "Detailed explanation of why these agents were selected in this order based on the alert type and entities.",
-      "next_steps": [
-        "context_enrichment",
-        "aws-vpc-flowlogs-investigation",
-        "endpoint_behavior",
-        "timeline_correlation",
-        "case_correlation"
-      ],
-      "investigation_focus": "Specific details on what the agents should look for"
-    }
+    STEP 4 - Add case_correlation to find related incidents:
+      - Dependencies: timeline_correlation
+      - Inputs: investigation_id, iocs, mitre_techniques, entities, time range
+      - Purpose: Identify campaigns or related attacks
 
-    CRITICAL RULE: "next_steps" MUST be a flat array of strings containing ONLY the exact names of the agents you wish to deploy. DO NOT use objects inside the array.
+    STEP 5 - Always end with report_generator:
+      - This is the final step
+      - Dependencies: ALL previous steps
+      - Inputs: investigation_id, original_alert, all_findings, timeline, related_cases
+      - Purpose: Create comprehensive investigation report
+
+    === INVESTIGATION PRIORITY CALCULATION ===
+    Determine priority based on:
+
+    IF severity == "critical":
+      priority = "high"
+      expected_duration = "30-60 minutes"
+    ELSE IF severity == "high":
+      priority = "high"
+      expected_duration = "45-90 minutes"
+    ELSE IF severity == "medium":
+      priority = "medium"
+      expected_duration = "60-120 minutes"
+    ELSE IF severity == "low":
+      priority = "low"
+      expected_duration = "90-180 minutes"
+
+    Increase priority by one level if:
+    - Alert involves critical assets (from context_enrichment)
+    - Alert involves privileged users (admin, root, etc.)
+    - Multiple alerts for same entity in short time
+    - Known IOC match found
+
+    === KEY QUESTIONS TO ANSWER ===
+    For each alert type, define key investigation questions:
+
+    Authentication alerts:
+      - "Is this logon pattern normal for this user?"
+      - "Where did the logon originate (IP, location)?"
+      - "Was this a brute force or credential stuffing attack?"
+      - "What actions occurred after successful logon?"
+      - "Are there signs of account compromise?"
+
+    Endpoint/Process alerts:
+      - "What process spawned this activity?"
+      - "Is this process/command line normal for this system?"
+      - "What is the complete process tree?"
+      - "Did the process make network connections or modify files?"
+      - "Are there signs of persistence or lateral movement?"
+
+    Malware/File alerts:
+      - "How did this file arrive on the system?"
+      - "What is the file's reputation (threat intel)?"
+      - "What did the file do when executed?"
+      - "Has this file spread to other systems?"
+      - "Is this part of a larger malware campaign?"
+
+    AWS CloudTrail alerts:
+      - "What AWS API call triggered this alert?"
+      - "Who made the call (IAM user, role, service)?"
+      - "Is this API call normal for this principal?"
+      - "What resources were affected?"
+      - "Are there signs of privilege escalation or data exfiltration?"
+      - "Were there related API calls before or after?"
+
+    AWS CloudWatch Logs alerts:
+      - "What application or service generated this log?"
+      - "What is the error or security event detected?"
+      - "Are there patterns indicating attack (injection, XSS, brute force)?"
+      - "What is the source IP and user involved?"
+      - "Was the attack successful or blocked?"
+      - "Are there related errors in the same timeframe?"
+
+    AWS CloudWatch Metrics alerts:
+      - "What metric is anomalous and by how much?"
+      - "What is the baseline for this metric?"
+      - "What could cause this deviation (crypto mining, DDoS, legitimate spike)?"
+      - "Are related metrics also anomalous?"
+      - "What is the cost impact of this anomaly?"
+      - "What API calls or logs correlate with this metric spike?"
+
+    AWS VPC Flow Logs alerts:
+      - "What network traffic pattern triggered this alert?"
+      - "Is this traffic ingress, egress, or internal?"
+      - "Are there signs of scanning, DDoS, or data exfiltration?"
+      - "What is the reputation of the external IP addresses?"
+      - "Were connections accepted or rejected by security groups?"
+      - "Are there patterns indicating C2 beaconing or lateral movement?"
+
+    === ESCALATION TRIGGERS ===
+    Automatically escalate to security team if:
+    - Confirmed malware detected (high confidence)
+    - Lateral movement detected
+    - Data exfiltration suspected
+    - Privileged account compromise
+    - Critical asset affected
+    - Multiple failed investigation steps (data unavailable)
+
+    === OUTPUT FORMAT ===
+    You MUST output a valid JSON object matching the exact structure requested in the user prompt. DO NOT invent new keys.
+
+    === DECISION LOGIC FOR PARALLEL VS SEQUENTIAL ===
+    Agents can run in PARALLEL if:
+    - They analyze different aspects (e.g., endpoint_behavior and malware_analysis on different events)
+    - They don't need each other's outputs
+    - They only depend on context_enrichment
+
+    Agents must run SEQUENTIALLY if:
+    - One agent's output is needed by another (e.g., endpoint_behavior finding process, then malware_analysis investigates that process file)
+    - Timeline/correlation/reporting agents (always sequential, always last)
+
+    Mark parallel steps with same step number, sequential steps with incrementing numbers.
 
   investigation_template: |
     NEW ALERT RECEIVED:
@@ -158,25 +291,42 @@ prompts:
 
     FOLLOW THIS PROCESS TO CREATE INVESTIGATION PLAN:
 
-    1. SELECT SPECIALIST AGENTS:
-       Use the agent selection decision tree in your system prompt.
+    1. IDENTIFY KEY ENTITIES:
+       Extract all entities (users, IPs, hostnames, file hashes) from the alert.
 
-    2. BUILD INVESTIGATION STEPS:
-       - Step 1: ALWAYS context_enrichment
+    2. SELECT SPECIALIST AGENTS:
+       Use the agent selection decision tree in your system prompt.
+       Match alert_type to appropriate specialist agents.
+
+    3. BUILD INVESTIGATION STEPS:
+       - Step 1: ALWAYS context_enrichment with all entities
        - Step 2+: Domain specialists based on alert type
        - Step N-2: timeline_correlation
        - Step N-1: case_correlation
        - Step N: report_generator
 
-    3. OUTPUT JSON:
-       Return the investigation plan in the exact JSON structure specified in the system prompt.
+    4. DEFINE KEY QUESTIONS:
+       Based on alert type, list 3-5 questions this investigation must answer.
+
+    5. SET PRIORITY:
+       Use priority calculation logic from system prompt.
+
+    6. IDENTIFY ESCALATION TRIGGERS:
+       List conditions that require immediate escalation.
+
+    7. OUTPUT JSON:
+       Return investigation plan in the exact JSON structure specified in the user prompt.
+
+    Be systematic and follow the decision tree exactly. Every investigation must start with context_enrichment and end with report_generator.
 
 output_schema:
   type: json
   fields:
+    investigation_id: string
+    priority: string
+    key_questions: array
+    investigation_steps: array
     reasoning: string
-    next_steps: array
-    investigation_focus: string
 
 escalation_rules:
   - condition: "critical_ioc_found"

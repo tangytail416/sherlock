@@ -101,7 +101,13 @@ export async function generateInvestigationReport(
 
   // Query Neo4j for graph-based context (if enabled)
   const neo4jEnabled = includeGraphContext && process.env.NEO4J_ENABLED !== 'false';
-  let graphContext = {
+  let graphContext: {
+    entities: any[];
+    relationships: any[];
+    relatedFindings: any[];
+    entityCounts: Record<string, number>;
+    lateralMovement: any[];
+  } = {
     entities: [],
     relationships: [],
     relatedFindings: [],
@@ -165,8 +171,9 @@ Generate a comprehensive security investigation report. Return your response as 
 
 {
   "sections": {
-    "executive_summary": "HTML content - 3-5 paragraphs in plain language for executives. Use <p>, <strong>, <em> tags.",
-    "threat_classification": "HTML content - MITRE ATT&CK mapping table. Use proper <table> with <thead> and <tbody>.",
+    "executive_summary": "Markdown content - 3-5 paragraphs in plain language for executives. Use **bold**, *italic*, and proper markdown formatting.",
+    "threat_classification": "Markdown content - MITRE ATT&CK mapping table. Use markdown table format with | columns |.",
+    "incident_severity": "The determined overall severity of the incident between CRITICAL, HIGH, MEDIUM, LOW, and FALSE_POSITIVE.",
     "key_findings": [
       "Finding 1 with confidence level",
       "Finding 2 with confidence level",
@@ -179,7 +186,7 @@ Generate a comprehensive security investigation report. Return your response as 
         "significance": "Why this matters"
       }
     ],
-    "technical_summary": "HTML content - Detailed technical analysis with subsections. Use <h3>, <p>, <ul>, <code> tags.",
+    "technical_summary": "Markdown content - Detailed technical analysis with subsections. Use ### for headings, **bold**, - for lists, single backticks for inline code.",
     "indicators_of_compromise": [
       "IP: 1.2.3.4 (Country) - Description",
       "Hash: abc123... - Malware name",
@@ -198,7 +205,7 @@ Generate a comprehensive security investigation report. Return your response as 
         "rationale": "Why this is important"
       }
     ],
-    "conclusion": "HTML content - 2-3 paragraphs summarizing the investigation. Use <p> tags."
+    "conclusion": "Markdown content - 2-3 paragraphs summarizing the investigation."
   },
   "metadata": {
     "severity": "CRITICAL|HIGH|MEDIUM|LOW",
@@ -207,12 +214,11 @@ Generate a comprehensive security investigation report. Return your response as 
 }
 
 IMPORTANT FORMATTING GUIDELINES:
-- Use semantic HTML tags: <p>, <strong>, <em>, <ul>, <li>, <code>, <pre>
-- For tables, use proper structure: <table><thead><tr><th>...</th></tr></thead><tbody><tr><td>...</td></tr></tbody></table>
-- For code blocks, use <pre><code>...</code></pre>
-- Keep HTML clean and semantic - no inline styles, classes will be added during rendering
-- Ensure all HTML is well-formed and properly closed
-- Use <h3> for subsection headings within technical_summary
+- Use markdown formatting: **bold**, *italic*, - for lists, ### for headings
+- For tables, use markdown table format: | Header | Header | then |--------|--------| then | Cell | Cell |
+- For code blocks, use triple backticks with language specification
+- Ensure proper markdown syntax throughout
+- Use ### for subsection headings within technical_summary
 
 Return ONLY the JSON object, no additional text.
 `;
@@ -259,15 +265,16 @@ Return ONLY the JSON object, no additional text.
 
     reportData = {
       sections: {
-        executive_summary: `<p>${extractSection('Executive Summary', markdownContent).replace(/\n\n/g, '</p><p>')}</p>`,
+        executive_summary: extractSection('Executive Summary 123', markdownContent),
         threat_classification: extractSection('MITRE ATT&CK Mapping', markdownContent) || 'Security incident under investigation',
+        incident_severity: extractSection('Overall determined severity', markdownContent) || `Unchanged as ${investigation.alert.severity}`,
         key_findings: extractList('Key Findings', markdownContent),
         attack_timeline: [],
-        technical_summary: `<p>${extractSection('Technical Analysis', markdownContent).replace(/\n\n/g, '</p><p>')}</p>`,
+        technical_summary: extractSection('Technical Analysis 456', markdownContent),
         indicators_of_compromise: extractList('Indicators of Compromise', markdownContent),
         impact_assessment: {},
         recommendations: [],
-        conclusion: `<p>${extractSection('Conclusion', markdownContent).replace(/\n\n/g, '</p><p>')}</p>`,
+        conclusion: extractSection('Conclusion', markdownContent),
       },
       metadata: {
         severity: investigation.alert.severity || 'MEDIUM',
@@ -282,7 +289,6 @@ Return ONLY the JSON object, no additional text.
   // Determine severity
   const severity = metadata.severity || investigation.alert.severity || 'MEDIUM';
 
-  // Create report in database with HTML sections
   const report = await prisma.report.create({
     data: {
       investigationId,
@@ -291,7 +297,7 @@ Return ONLY the JSON object, no additional text.
         sections: sections,
         severity: severity,
       },
-      summary: sections.executive_summary?.replace(/<[^>]*>/g, '').substring(0, 3000) || 'Report generated successfully',
+      summary: sections.executive_summary?.substring(0, 4000) || 'Report generated successfully',
       recommendations: JSON.stringify(sections.recommendations || []),
     },
   });

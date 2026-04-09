@@ -5,7 +5,7 @@
 name: endpoint_behavior
 version: "1.0.0"
 type: specialist
-enabled: true
+enabled: false
 domain: endpoint
 description: |
   Investigates endpoint activities including process execution, command lines,

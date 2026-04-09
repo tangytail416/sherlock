@@ -11,6 +11,16 @@ import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import {
   ArrowLeft,
   AlertTriangle,
   Clock,
@@ -21,6 +31,7 @@ import {
   CheckCircle2,
   Download,
   Layers,
+  Trash2,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { PageLayout } from '@/components/layout/page-layout';
@@ -183,6 +194,7 @@ export default function ReportDetailPage() {
   const router = useRouter();
   const [report, setReport] = useState<Report | null>(null);
   const [loading, setLoading] = useState(true);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
 
   useEffect(() => {
     if (params.id) {
@@ -257,6 +269,26 @@ export default function ReportDetailPage() {
     }
   };
 
+  const handleDeleteClick = () => {
+    setDeleteDialogOpen(true);
+  };
+
+  const handleDeleteConfirm = async () => {
+    if (!report) return;
+
+    try {
+      const response = await fetch(`/api/reports/${report.id}`, {
+        method: 'DELETE',
+      });
+      if (response.ok) {
+        setDeleteDialogOpen(false);
+        router.push('/reports');
+      }
+    } catch (error) {
+      console.error('Error deleting report:', error);
+    }
+  };
+
   if (loading) {
     return (
       <div className="text-center py-12 text-muted-foreground">
@@ -304,6 +336,10 @@ export default function ReportDetailPage() {
         <Button variant="outline" onClick={exportReport}>
           <Download className="h-4 w-4 mr-2" />
           Export
+        </Button>
+        <Button variant="outline" onClick={handleDeleteClick} className="text-destructive hover:text-destructive">
+          <Trash2 className="h-4 w-4 mr-2" />
+          Delete
         </Button>
       </div>
     </div>
@@ -464,7 +500,11 @@ export default function ReportDetailPage() {
         <div key="campaign" className="space-y-2">
           <h4 className="font-medium text-sm">Campaign Analysis</h4>
           <div className="p-3 bg-muted rounded-md">
-            <p className="text-sm whitespace-pre-wrap">{tc.campaign_analysis}</p>
+            <div className="prose prose-sm max-w-none dark:prose-invert">
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                {tc.campaign_analysis}
+              </ReactMarkdown>
+            </div>
           </div>
         </div>
       );
@@ -475,7 +515,11 @@ export default function ReportDetailPage() {
         <div key="actor" className="space-y-2">
           <h4 className="font-medium text-sm">Threat Actor Profile</h4>
           <div className="p-3 bg-muted rounded-md">
-            <p className="text-sm whitespace-pre-wrap">{tc.threat_actor_profile}</p>
+            <div className="prose prose-sm max-w-none dark:prose-invert">
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                {tc.threat_actor_profile}
+              </ReactMarkdown>
+            </div>
           </div>
         </div>
       );
@@ -497,7 +541,11 @@ export default function ReportDetailPage() {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <p className="text-muted-foreground leading-relaxed">{report.summary}</p>
+          <div className="prose prose-sm max-w-none dark:prose-invert">
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+              {report.summary}
+            </ReactMarkdown>
+          </div>
         </CardContent>
       </Card>
 
@@ -984,6 +1032,24 @@ export default function ReportDetailPage() {
           </CardContent>
         </Card>
       ) : null}
+
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Report</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete this report? This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDeleteConfirm} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
       </div>
     </PageLayout>
   );

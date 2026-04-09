@@ -32,6 +32,8 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip';
+import { useColorConfigs, getSeverityClasses, getInvestigationStatusClasses } from '@/lib/hooks/use-colors';
+import { cn } from '@/lib/utils';
 
 type Investigation = {
   id: string;
@@ -59,23 +61,9 @@ interface InvestigationsFiltersProps {
   investigations: Investigation[];
 }
 
-const statusColors = {
-  pending: 'secondary',
-  active: 'default',
-  completed: 'secondary',
-  failed: 'destructive',
-  stopped: 'outline',
-} as const;
-
-const priorityColors = {
-  critical: 'destructive',
-  high: 'destructive',
-  medium: 'default',
-  low: 'secondary',
-} as const;
-
 export function InvestigationsFilters({ investigations }: InvestigationsFiltersProps) {
   const router = useRouter();
+  const colors = useColorConfigs();
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [severityFilter, setSeverityFilter] = useState<string>('all');
@@ -341,18 +329,16 @@ export function InvestigationsFilters({ investigations }: InvestigationsFiltersP
                     </TableCell>
                     <TableCell>
                       <Badge
-                        variant={
-                          priorityColors[investigation.priority as keyof typeof priorityColors]
-                        }
+                        variant="outline"
+                        className={cn("border", getSeverityClasses(investigation.priority, colors))}
                       >
                         {investigation.priority}
                       </Badge>
                     </TableCell>
                     <TableCell>
                       <Badge
-                        variant={
-                          statusColors[investigation.status as keyof typeof statusColors]
-                        }
+                        variant="outline"
+                        className={cn("border capitalize", getInvestigationStatusClasses(investigation.status, colors))}
                       >
                         {investigation.status}
                       </Badge>

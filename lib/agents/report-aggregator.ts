@@ -153,7 +153,7 @@ ${JSON.stringify(report.attack_timeline, null, 2)}
 
   const report = await prisma.report.create({
     data: {
-      investigationId: null as unknown as string,
+      investigationId: validReports[0].investigationId,
       title: `${folderName}: Summarized Report`,
       content: {
         sections,

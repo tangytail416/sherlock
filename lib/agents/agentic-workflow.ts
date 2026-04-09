@@ -496,7 +496,7 @@ async function executeSpecialistAgent(
     // Agent's autonomous investigation loop
     let agentComplete = false;
     let agentIteration = 0;
-    const maxAgentIterations = 20; // Reduced from 50 to prevent excessive loops
+    const maxAgentIterations = 30; // Reduced from 50 to prevent excessive loops
     const agentFindings: any[] = [];
     let judgeHasChallenged = false;
 
@@ -1012,7 +1012,6 @@ async function executeSpecialistAgent(
             });
 
             // Detect repeated empty results
-// Detect repeated empty results
             if (results.length === 0) {
               // Count how many of the MOST RECENT executed queries were empty
               const executedQueries = agentFindings.filter(f => f.action === 'query' && !f.skipped);
@@ -1034,11 +1033,11 @@ async function executeSpecialistAgent(
                 
                 // Inject guidance into the finding we just pushed so the LLM sees it on the next loop
                 const currentFinding = agentFindings[agentFindings.length - 1];
-                currentFinding.guidance = `SYSTEM WARNING: Your last 3 queries have returned exactly 0 results. You are likely searching the wrong index, using incorrect field names, or applying overly strict filters. CRITICAL: You MUST completely change your search strategy in the next iteration. Broaden your search, try different sourcetypes, or if you believe the data does not exist, use action="report" to conclude this path.`;
+                currentFinding.guidance = `SYSTEM WARNING: Your last 3 queries have returned exactly 0 results. You are likely searching the wrong index, using incorrect field names, or applying overly strict filters. If this is expected, or if you are trying to create a baseline, you MUST execute at least one successful query before continuing. Any query will do as long as it returns results. If not, broaden your search, try different sourcetypes, or if you believe the data does not exist, use action="report" to conclude this path.`;
               }
 
-              // At 5 in a row, pull the plug
-              if (consecutiveEmptyCount >= 6) {
+              // At 10 in a row, pull the plug
+              if (consecutiveEmptyCount >= 10) {
                 console.log(`[Agent: ${agentName}] Forcing completion after 6 consecutive empty results`);
                 
                 // Check if the agent actually found things in earlier queries
@@ -1601,14 +1600,23 @@ OUTPUT FORMAT (JSON):
 
   const reflection = parseJSON(response.content);
 
-  // --- NEW: FORCED ARRAY OVERRIDE ---
+ // --- NEW: FORCED ARRAY OVERRIDE & QUEUE PROTECTION ---
   if (reflection.complete && unresolvedFailures.length === 0) {
     state.current_phase = 'synthesis';
     state.next_steps = [];
   } else {
     let nextSteps = Array.isArray(reflection.next_steps) ? reflection.next_steps : [];
     
-    // Safety net: force unresolved failures back to the front if LLM ignored the warning
+    // 1. PREVENT AMNESIA: The LLM often forgets the previously queued agents. 
+    // We must merge the old pending queue with any new agents the LLM just suggested.
+    const oldQueue = state.next_steps.filter(a => a !== 'report_generator');
+    for (const agent of oldQueue) {
+      if (!nextSteps.includes(agent)) {
+        nextSteps.push(agent);
+      }
+    }
+
+    // 2. Safety net: force unresolved failures back to the front
     for (const failedAgent of unresolvedFailures) {
       if (!nextSteps.includes(failedAgent)) {
          nextSteps.unshift(failedAgent);
@@ -1616,17 +1624,23 @@ OUTPUT FORMAT (JSON):
       }
     }
 
-    // Guarantee report_generator is absolute last
+    // 3. REPORT GENERATOR SHIELD: Completely strip report_generator if there are ANY other agents left to run.
     if (nextSteps.includes('report_generator')) {
       nextSteps = nextSteps.filter((s: string) => s !== 'report_generator');
-      nextSteps.push('report_generator');
+      
+      // Only append it if the queue is strictly empty (meaning everything else is done)
+      if (nextSteps.length === 0) {
+         nextSteps.push('report_generator');
+      } else {
+         console.log(`[Orchestrator] Shield triggered: Removed report_generator from queue because other agents (${nextSteps.join(', ')}) must run first.`);
+      }
     }
 
     state.next_steps = nextSteps;
     
-    // If the LLM said complete: true but we had failures, override it
-    if (reflection.complete) {
-       console.log(`[Orchestrator] Overriding complete=true because of unresolved failures.`);
+    // If the LLM said complete: true but we had failures or pending agents, override it
+    if (reflection.complete && state.next_steps.length > 0) {
+       console.log(`[Orchestrator] Overriding complete=true because queue still has pending agents.`);
        reflection.complete = false;
     }
   }

@@ -35,6 +35,8 @@ import { formatDistanceToNow } from 'date-fns';
 import { toast } from 'sonner';
 import { BulkAddToFolderDialog } from './bulk-add-to-folder-dialog';
 import { AggregateReportsDialog } from './aggregate-reports-dialog';
+import { useColorConfigs, getSeverityClasses } from '@/lib/hooks/use-colors';
+import { cn } from '@/lib/utils';
 
 interface ReportFolder {
   id: string;
@@ -68,6 +70,7 @@ interface ReportsTableProps {
 }
 
 export function ReportsTable({ folderId, folderName }: ReportsTableProps) {
+  const colors = useColorConfigs();
   const [reports, setReports] = useState<Report[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -139,22 +142,6 @@ export function ReportsTable({ folderId, folderName }: ReportsTableProps) {
     router.push(`/reports/${reportId}`);
   };
 
-  const getSeverityColor = (severity?: string) => {
-    if (!severity) return 'outline';
-    switch (severity.toLowerCase()) {
-      case 'critical':
-        return 'destructive';
-      case 'high':
-        return 'destructive';
-      case 'medium':
-        return 'default';
-      case 'low':
-        return 'secondary';
-      default:
-        return 'outline';
-    }
-  };
-
   const canAggregate = folderId && selectedIndividualCount >= 2 && selectedIndividualCount <= 15;
   const overMaxLimit = folderId && selectedIndividualCount > 15;
 
@@ -202,7 +189,7 @@ export function ReportsTable({ folderId, folderName }: ReportsTableProps) {
                     </Badge>
                   </TableCell>
                   <TableCell>
-                    <Badge variant={getSeverityColor(report.aggregatedSeverity) as any}>
+                    <Badge variant="outline" className={cn("border", getSeverityClasses(report.aggregatedSeverity || 'medium', colors))}>
                       {report.aggregatedSeverity || 'MEDIUM'}
                     </Badge>
                   </TableCell>
@@ -420,7 +407,7 @@ export function ReportsTable({ folderId, folderName }: ReportsTableProps) {
                       )}
                     </TableCell>
                     <TableCell>
-                      <Badge variant={getSeverityColor(report.investigation?.alert?.severity) as any}>
+                      <Badge variant="outline" className={cn("border", getSeverityClasses(report.investigation?.alert?.severity || 'medium', colors))}>
                         {report.investigation?.alert?.severity || 'unknown'}
                       </Badge>
                     </TableCell>

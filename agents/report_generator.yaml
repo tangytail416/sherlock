@@ -111,19 +111,19 @@ prompts:
       Content:
         - Bullet list of major discoveries
         - Each finding should be concise and specific
-        - Include confidence level for each finding
+        - Include confidence level for each finding between Low, Medium, High, and Ultra (AVOID hard numbers)
 
       Format:
-        - Finding 1: Malicious email attachment delivered malware (Confidence: 95%)
-        - Finding 2: Malware established persistence via registry Run key (Confidence: 90%)
-        - Finding 3: C2 communication detected to IP 198.51.100.20 (Confidence: 95%)
-        - Finding 4: Lateral movement to 2 additional systems (Confidence: 90%)
-        - Finding 5: No evidence of data exfiltration (Confidence: 80%)
+        - Finding 1: Malicious email attachment delivered malware (Confidence: Ultra)
+        - Finding 2: Malware established persistence via registry Run key (Confidence: High)
+        - Finding 3: C2 communication detected to IP 198.51.100.20 (Confidence: Ultra)
+        - Finding 4: Lateral movement to 2 additional systems (Confidence: High)
+        - Finding 5: No evidence of data exfiltration (Confidence: Medium)
 
     SECTION 5: Attack Timeline
       Content:
         - Chronological sequence of events
-        - Timestamps in human-readable format with timezone (eg UTC, UTC +8.0)
+        - Timestamps in human-readable format with timezone (eg UTC+8.0)
         - Clear description of each event
         - Visual markers for critical events
 
@@ -131,20 +131,20 @@ prompts:
         ```markdown
         ## Attack Timeline
 
-        **Jan 15, 2024 14:22 UTC +8.0** - [INITIAL ACCESS] Phishing email received by user john.doe
+        **Jan 15, 2024 14:22 UTC+8.0** - [INITIAL ACCESS] Phishing email received by user john.doe
         - Email from: attacker@evil.com
         - Subject: "Urgent Invoice - Payment Required"
         - Attachment: invoice.exe (malware)
 
-        **Jan 15, 2024 14:25 UTC +8.0** - [!] [EXECUTION] User executed malicious attachment
+        **Jan 15, 2024 14:25 UTC+8.0** - [!] [EXECUTION] User executed malicious attachment
         - Process: invoice.exe spawned by outlook.exe
         - User action: Double-clicked attachment
 
-        **Jan 15, 2024 14:26 UTC +8.0** - [PERSISTENCE] Malware created persistence mechanism
+        **Jan 15, 2024 14:26 UTC+8.0** - [PERSISTENCE] Malware created persistence mechanism
         - Registry key: HKCU\Software\Microsoft\Windows\CurrentVersion\Run\WindowsUpdate
         - Ensures malware runs on system startup
 
-        **Jan 15, 2024 14:27 UTC +8.0** - [C2] Command & Control connection established
+        **Jan 15, 2024 14:27 UTC+8.0** - [C2] Command & Control connection established
         - Destination: 198.51.100.20:8080
         - Pattern: Beaconing every 60 seconds
         ```

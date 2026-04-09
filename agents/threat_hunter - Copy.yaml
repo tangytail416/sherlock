@@ -1,7 +1,7 @@
 name: threat_hunter
 version: "1.0.0"
 type: specialist
-enabled: true
+enabled: false
 domain: threat_hunting
 description: |
   Proactive threat hunter that scans for suspicious activities and identifies

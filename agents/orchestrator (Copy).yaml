@@ -5,7 +5,7 @@
 name: orchestrator
 version: "1.0.0"
 type: orchestrator
-enabled: true
+enabled: false
 description: |
   Master coordinator that receives alerts, builds investigation plans,
   delegates to specialist agents, and manages overall investigation workflow.

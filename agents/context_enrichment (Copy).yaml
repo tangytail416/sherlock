@@ -5,7 +5,7 @@
 name: context_enrichment
 version: "1.0.0"
 type: specialist
-enabled: true
+enabled: false
 domain: context
 description: |
   Gathers baseline context about entities involved in an alert.

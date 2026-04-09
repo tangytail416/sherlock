@@ -25,27 +25,85 @@ export async function GET(
     }
 
     const content = report.content as any;
-    // Data is stored at content root level, not under sections
-    const sections = {
-      executive_summary: content?.raw ? extractMarkdownSection(content.raw, 'Executive Summary') : '',
-      threat_classification: content?.threat_classification || '',
-      key_findings: content?.key_findings || [],
-      attack_timeline: content?.attack_timeline || [],
-      technical_summary: content?.technical_summary || '',
-      indicators_of_compromise: content?.indicators_of_compromise || [],
-      impact_assessment: content?.impact_assessment || {},
-      conclusion: content?.conclusion || '',
-    };
+    const sections = content?.sections || {};
     const severity = content?.severity || report.investigation?.alert?.severity || 'MEDIUM';
-    
-    // Helper function to extract markdown sections
-    function extractMarkdownSection(markdown: string, sectionName: string): string {
-      const regex = new RegExp(`##\\s*(?:SECTION\\s+\\d+:\\s*)?\\d*\\.?\\s*${sectionName}[^\\n]*\\n([\\s\\S]*?)(?=\\n##\\s*(?:SECTION\\s+\\d+:)?|\\n---|\\z)`, 'i');
-      const match = markdown.match(regex);
-      if (match && match[1]) {
-        return match[1].trim().replace(/\n/g, '<br>');
+
+    function markdownToHtml(markdown: string): string {
+      if (!markdown) return '';
+      return markdown
+        .replace(/^### (.+)$/gm, '<h3>$1</h3>')
+        .replace(/^## (.+)$/gm, '<h2>$1</h2>')
+        .replace(/^# (.+)$/gm, '<h1>$1</h1>')
+        .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+        .replace(/\*(.+?)\*/g, '<em>$1</em>')
+        .replace(/`([^`]+)`/g, '<code>$1</code>')
+        .replace(/^- (.+)$/gm, '<li>$1</li>')
+        .replace(/(<li>.*<\/li>\n?)+/g, '<ul>$&</ul>')
+        .replace(/\n/g, '<br>');
+    }
+
+    function renderThreatClassification(tc: any): string {
+      if (!tc) return '';
+      if (typeof tc === 'string') return markdownToHtml(tc);
+      
+      let html = '';
+      if (tc.mitre_techniques?.length) {
+        html += '<h3>MITRE ATT&CK Techniques</h3>';
+        html += '<table><thead><tr><th>Technique ID</th><th>Technique Name</th><th>Incidents</th></tr></thead><tbody>';
+        tc.mitre_techniques.forEach((tech: any) => {
+          html += `<tr><td><a href="https://attack.mitre.org/techniques/${tech.technique_id.replace('.', '/')}" target="_blank">${tech.technique_id}</a></td><td>${tech.technique_name}</td><td>${tech.incidents?.join(', ') || ''}</td></tr>`;
+        });
+        html += '</tbody></table>';
       }
-      return '';
+      if (tc.campaign_analysis) {
+        html += '<h3>Campaign Analysis</h3>';
+        html += markdownToHtml(tc.campaign_analysis);
+      }
+      if (tc.threat_actor_profile) {
+        html += '<h3>Threat Actor Profile</h3>';
+        html += markdownToHtml(tc.threat_actor_profile);
+      }
+      return html;
+    }
+
+    function renderIOCs(iocs: any): string {
+      if (!iocs) return '';
+      if (Array.isArray(iocs)) {
+        return iocs.map(ioc => `<div class="ioc-item">${ioc}</div>`).join('');
+      }
+      
+      let html = '';
+      if (iocs.file_hashes?.length) {
+        html += '<h3>File Hashes</h3>';
+        iocs.file_hashes.forEach((ioc: any) => {
+          html += `<div class="ioc-item"><code>${ioc.hash}</code><br><small>${ioc.description || ''}</small>${ioc.incidents ? `<br><small>In: ${ioc.incidents.join(', ')}</small>` : ''}</div>`;
+        });
+      }
+      if (iocs.ip_addresses?.length) {
+        html += '<h3>IP Addresses</h3>';
+        iocs.ip_addresses.forEach((ioc: any) => {
+          html += `<div class="ioc-item"><code>${ioc.ip}</code>${ioc.country ? ` (${ioc.country})` : ''}${ioc.type ? ` - ${ioc.type}` : ''}${ioc.incidents ? `<br><small>In: ${ioc.incidents.join(', ')}</small>` : ''}</div>`;
+        });
+      }
+      if (iocs.domains?.length) {
+        html += '<h3>Domains</h3>';
+        iocs.domains.forEach((ioc: any) => {
+          html += `<div class="ioc-item"><code>${ioc.domain}</code>${ioc.type ? ` - ${ioc.type}` : ''}${ioc.incidents ? `<br><small>In: ${ioc.incidents.join(', ')}</small>` : ''}</div>`;
+        });
+      }
+      if (iocs.email_indicators?.length) {
+        html += '<h3>Email Indicators</h3>';
+        iocs.email_indicators.forEach((ioc: any) => {
+          html += `<div class="ioc-item"><code>${ioc.sender}</code>${ioc.subject_pattern ? `<br>Subject: ${ioc.subject_pattern}` : ''}</div>`;
+        });
+      }
+      if (iocs.other?.length) {
+        html += '<h3>Other Indicators</h3>';
+        iocs.other.forEach((ioc: any) => {
+          html += `<div class="ioc-item"><code>${ioc.indicator}</code>${ioc.description ? `<br><small>${ioc.description}</small>` : ''}</div>`;
+        });
+      }
+      return html;
     }
     
     const recommendations = typeof report.recommendations === 'string' 
@@ -416,14 +474,14 @@ export async function GET(
     </div>
 
     <!-- Executive Summary -->
-    ${sections.executive_summary ? `
+    ${report.summary ? `
     <div class="section">
       <div class="section-header">
         <span class="section-icon">📋</span>
         <h2 class="section-title">Executive Summary</h2>
       </div>
       <div class="section-content">
-        ${sections.executive_summary}
+        ${markdownToHtml(report.summary)}
       </div>
     </div>
     ` : ''}
@@ -436,7 +494,7 @@ export async function GET(
         <h2 class="section-title">Threat Classification</h2>
       </div>
       <div class="section-content">
-        ${sections.threat_classification}
+        ${renderThreatClassification(sections.threat_classification)}
       </div>
     </div>
     ` : ''}
@@ -453,7 +511,7 @@ export async function GET(
           ${sections.key_findings.map((finding: string) => `
             <li class="finding-item">
               <span class="finding-icon">✓</span>
-              <span>${finding}</span>
+              <span>${markdownToHtml(finding)}</span>
             </li>
           `).join('')}
         </ul>
@@ -488,13 +546,13 @@ export async function GET(
         <h2 class="section-title">Technical Analysis</h2>
       </div>
       <div class="section-content">
-        ${sections.technical_summary}
+        ${markdownToHtml(sections.technical_summary)}
       </div>
     </div>
     ` : ''}
 
     <!-- Indicators of Compromise -->
-    ${sections.indicators_of_compromise && sections.indicators_of_compromise.length > 0 ? `
+    ${sections.indicators_of_compromise ? `
     <div class="section">
       <div class="section-header">
         <span class="section-icon">🛡️</span>
@@ -502,9 +560,7 @@ export async function GET(
       </div>
       <div class="section-content">
         <div class="ioc-list">
-          ${sections.indicators_of_compromise.map((ioc: string) => `
-            <div class="ioc-item">${ioc}</div>
-          `).join('')}
+          ${renderIOCs(sections.indicators_of_compromise)}
         </div>
       </div>
     </div>
@@ -565,7 +621,7 @@ export async function GET(
         <h2 class="section-title">Conclusion</h2>
       </div>
       <div class="section-content">
-        ${sections.conclusion}
+        ${markdownToHtml(sections.conclusion)}
       </div>
     </div>
     ` : ''}

@@ -53,7 +53,7 @@ export default function ReportsPage() {
           <div>
             <h1 className="text-xl md:text-2xl lg:text-3xl font-bold tracking-tight">Reports</h1>
             <p className="text-xs md:text-sm text-muted-foreground">
-              {folderName ? `${folderName} - Investigation reports and findings` : 'Investigation reports and findings'}
+              {folderName ? `${folderName} - Investigation reports and findings` : 'Investiggation reports and findings'}
             </p>
           </div>
           <FolderDropdown

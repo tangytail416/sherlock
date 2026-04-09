@@ -86,27 +86,27 @@ const CATEGORY_CONFIG: Record<string, {
 const CLASSIFICATION_COLORS: Record<string, { bg: string; text: string; border: string }> = {
   'True Positive': {
     bg: 'bg-emerald-500/15',
-    text: 'text-emerald-700 dark:text-emerald-300',
+    text: 'text-white dark:text-slate-150',
     border: 'border-emerald-500/40',
   },
   'False Positive': {
     bg: 'bg-slate-500/15',
-    text: 'text-slate-700 dark:text-slate-300',
+    text: 'text-white dark:text-slate-150',
     border: 'border-slate-500/40',
   },
   'Benign': {
     bg: 'bg-sky-500/15',
-    text: 'text-sky-700 dark:text-sky-300',
+    text: 'text-white dark:text-slate-150',
     border: 'border-sky-500/40',
   },
   'Testing': {
     bg: 'bg-amber-500/15',
-    text: 'text-amber-700 dark:text-amber-300',
+    text: 'text-white dark:text-slate-150',
     border: 'border-amber-500/40',
   },
   'Under Investigation': {
     bg: 'bg-violet-500/15',
-    text: 'text-violet-700 dark:text-violet-300',
+    text: 'text-white dark:text-slate-150',
     border: 'border-violet-500/40',
   },
 };

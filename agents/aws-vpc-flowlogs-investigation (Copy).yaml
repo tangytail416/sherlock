@@ -9,7 +9,7 @@
 name: aws-vpc-flowlogs-investigation
 version: "1.0.0"
 type: specialist
-enabled: true
+enabled: false
 domain: aws_security
 
 description: |

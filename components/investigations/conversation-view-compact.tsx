@@ -22,6 +22,8 @@ import {
   renderIOCs,
   renderRecommendations,
 } from './conversation/message-types';
+import { useColorConfigs, getInvestigationStatusClasses, getSeverityClasses } from '@/lib/hooks/use-colors';
+import { cn } from '@/lib/utils';
 
 interface AgentEvent {
   investigationId: string;
@@ -70,6 +72,7 @@ interface Investigation {
 }
 
 export function InvestigationConversationView({ id }: { id: string }) {
+  const colors = useColorConfigs();
   const [investigation, setInvestigation] = useState<Investigation | null>(null);
   const [messages, setMessages] = useState<ConversationMessage[]>([]);
   const [userInput, setUserInput] = useState('');
@@ -1003,7 +1006,7 @@ export function InvestigationConversationView({ id }: { id: string }) {
               <div>
                 <div className="font-semibold text-sm mb-1">Alert Triggered</div>
                 <div className="text-sm">{message.content}</div>
-                <Badge variant="outline" className="mt-2">
+                <Badge variant="outline" className={cn("mt-2 border", getSeverityClasses(message.metadata?.severity || 'medium', colors))}>
                   {message.metadata?.severity}
                 </Badge>
               </div>
@@ -1069,7 +1072,7 @@ export function InvestigationConversationView({ id }: { id: string }) {
             </div>
           </div>
           <div className="flex items-center gap-2 flex-wrap">
-            <Badge variant={investigation.status === 'active' ? 'default' : 'secondary'}>
+            <Badge variant="outline" className={cn("border capitalize", getInvestigationStatusClasses(investigation.status, colors))}>
               {investigation.status}
             </Badge>
             <Badge variant={isConnected ? 'default' : 'secondary'}>

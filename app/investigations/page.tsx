@@ -1,17 +1,4 @@
-import Link from 'next/link';
-import { formatDistanceToNow } from 'date-fns';
-import { Eye } from 'lucide-react';
 import { prisma } from '@/lib/db';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
 import { InvestigationsFilters } from '@/components/investigations/investigations-filters';
 
 async function getInvestigations() {
@@ -42,21 +29,6 @@ async function getInvestigations() {
     return [];
   }
 }
-
-const statusColors = {
-  pending: 'secondary',
-  active: 'default',
-  completed: 'secondary',
-  failed: 'destructive',
-  stopped: 'outline',
-} as const;
-
-const priorityColors = {
-  critical: 'destructive',
-  high: 'destructive',
-  medium: 'default',
-  low: 'secondary',
-} as const;
 
 export default async function InvestigationsPage() {
   const investigations = await getInvestigations();

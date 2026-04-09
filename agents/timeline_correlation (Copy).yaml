@@ -5,7 +5,7 @@
 name: timeline_correlation
 version: "1.0.0"
 type: correlation
-enabled: true
+enabled: false
 domain: correlation
 description: |
   Builds chronological timelines of events, identifies causal relationships,

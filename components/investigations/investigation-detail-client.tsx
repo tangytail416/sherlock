@@ -25,21 +25,8 @@ import { InvestigationChat } from '@/components/investigations/investigation-cha
 import { PageLayout } from '@/components/layout/page-layout';
 import { CollapsibleFindings } from '@/components/investigations/collapsible-findings';
 import { TagsInput } from '@/components/investigations/tags-input';
-
-const statusColors = {
-  pending: 'secondary',
-  active: 'default',
-  completed: 'secondary',
-  failed: 'destructive',
-  stopped: 'outline',
-} as const;
-
-const priorityColors = {
-  critical: 'destructive',
-  high: 'destructive',
-  medium: 'default',
-  low: 'secondary',
-} as const;
+import { useColorConfigs, getSeverityClasses, getInvestigationStatusClasses } from '@/lib/hooks/use-colors';
+import { cn } from '@/lib/utils';
 
 interface Investigation {
   id: string;
@@ -82,6 +69,7 @@ interface Investigation {
 }
 
 export function InvestigationDetailClient({ id }: { id: string }) {
+  const colors = useColorConfigs();
   const [investigation, setInvestigation] = useState<Investigation | null>(null);
   const [loading, setLoading] = useState(true);
   const [chatOpen, setChatOpen] = useState(false);
@@ -193,7 +181,7 @@ export function InvestigationDetailClient({ id }: { id: string }) {
           existingReportId={existingReport?.id}
           investigationStatus={investigation.status}
         />
-        <Badge variant={statusColors[investigation.status as keyof typeof statusColors]}>
+        <Badge variant="outline" className={cn("border capitalize", getInvestigationStatusClasses(investigation.status, colors))}>
           {investigation.status}
         </Badge>
       </div>
@@ -214,8 +202,8 @@ export function InvestigationDetailClient({ id }: { id: string }) {
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="flex items-center justify-between">
-              <span className="text-sm font-medium">Priority</span>
-              <Badge variant={priorityColors[investigation.priority as keyof typeof priorityColors]}>
+              <span className="text-sm font-medium">Severity</span>
+              <Badge variant="outline" className={cn("border", getSeverityClasses(investigation.priority, colors))}>
                 {investigation.priority}
               </Badge>
             </div>
@@ -276,12 +264,8 @@ export function InvestigationDetailClient({ id }: { id: string }) {
                   </p>
                 </div>
                 <Badge
-                  variant={
-                    investigation.alert.severity === 'critical' ||
-                    investigation.alert.severity === 'high'
-                      ? 'destructive'
-                      : 'default'
-                  }
+                  variant="outline"
+                  className={cn("border", getSeverityClasses(investigation.alert.severity, colors))}
                 >
                   {investigation.alert.severity}
                 </Badge>

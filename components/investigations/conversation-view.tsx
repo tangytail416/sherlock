@@ -26,6 +26,8 @@ import {
   renderIOCs,
   renderRecommendations,
 } from './conversation/message-types';
+import { useColorConfigs, getInvestigationStatusClasses } from '@/lib/hooks/use-colors';
+import { cn } from '@/lib/utils';
 
 interface AgentEvent {
   investigationId: string;
@@ -67,6 +69,7 @@ interface Investigation {
 }
 
 export function InvestigationConversationView({ id }: { id: string }) {
+  const colors = useColorConfigs();
   const [investigation, setInvestigation] = useState<Investigation | null>(null);
   const [messages, setMessages] = useState<ConversationMessage[]>([]);
   const [userInput, setUserInput] = useState('');
@@ -900,7 +903,7 @@ export function InvestigationConversationView({ id }: { id: string }) {
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <Badge variant={investigation.status === 'active' ? 'default' : 'secondary'}>
+            <Badge variant="outline" className={cn("border capitalize", getInvestigationStatusClasses(investigation.status, colors))}>
               {investigation.status}
             </Badge>
             <Badge variant={isConnected ? 'default' : 'secondary'}>
